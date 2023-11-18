@@ -1,4 +1,4 @@
-# sdre_stubborn-io
+# sdre-stubborn-io
 
 This crate provides io traits/structs that automatically recover from potential disconnections/interruptions.
 
