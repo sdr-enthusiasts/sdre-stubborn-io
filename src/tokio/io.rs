@@ -276,14 +276,14 @@ where
 
             let reconnect_attempt = async move {
                 future_instant.await;
-                info!("{} Attempting reconnect #{} now.", connection_name, cur_num);
+                info!("{}Attempting reconnect #{} now.", connection_name, cur_num);
                 T::establish(ctor_arg).await
             };
 
             reconnect_status.reconnect_attempt = Box::pin(reconnect_attempt);
 
             info!(
-                "{} Will perform reconnect attempt #{} in {:?}.",
+                "{}Will perform reconnect attempt #{} in {:?}.",
                 connection_name_alt, reconnect_status.attempts_tracker.attempt_num, next_duration
             );
 
