@@ -11,7 +11,7 @@ use std::time::Duration;
 ///
 /// // With the below strategy, the stubborn-io item will try to reconnect infinitely,
 /// // waiting an exponentially increasing (by 2) value with 5% random jitter. Once the
-/// // wait would otherwise exceed the maxiumum of 30 seconds, it will instead wait 30
+/// // wait would otherwise exceed the maximum of 30 seconds, it will instead wait 30
 /// // seconds.
 ///
 /// let options = ReconnectOptions::new().with_retries_generator(|| {

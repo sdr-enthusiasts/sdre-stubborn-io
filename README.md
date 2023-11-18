@@ -1,5 +1,4 @@
-stubborn-io
-===========
+# stubborn-io
 
 This crate provides io traits/structs that automatically recover from potential disconnections/interruptions.
 
@@ -11,7 +10,6 @@ stubborn-io = "0.3"
 
 API Documentation, examples and motivations can be found here -
 https://docs.rs/stubborn-io .
-
 
 ### Usage Example
 
@@ -32,4 +30,3 @@ let mut tcp_stream = StubbornTcpStream::connect(addr).await?;
 // call all of the regular methods on it, as seen below
 tcp_stream.write_all(b"hello world!").await?;
 ```
-
