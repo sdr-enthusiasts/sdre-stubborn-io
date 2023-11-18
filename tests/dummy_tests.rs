@@ -1,3 +1,5 @@
+use sdre_stubborn_io::tokio::{StubbornIo, UnderlyingIo};
+use sdre_stubborn_io::ReconnectOptions;
 use std::future::Future;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
@@ -6,8 +8,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use stubborn_io::tokio::{StubbornIo, UnderlyingIo};
-use stubborn_io::ReconnectOptions;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[derive(Default)]
