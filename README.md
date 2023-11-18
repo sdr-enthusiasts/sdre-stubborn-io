@@ -5,13 +5,23 @@ This crate provides io traits/structs that automatically recover from potential 
 To use with your project, add the following to your Cargo.toml:
 
 ```toml
-stubborn-io = "0.3"
+stubborn-io = { git = "https://github.com/sdr-enthusiasts/sdre-stubborn-io.git" }
 ```
 
-API Documentation, examples and motivations can be found here -
-https://docs.rs/stubborn-io .
+## Thanks and purpose
 
-### Usage Example
+This project has been forked from [stubborn-io](https://github.com/craftytrickster/stubborn-io) and modified to add the ability to name connections. Much thanks to [craftytrickster](https://github.com/craftytrickster) for the original project.
+
+## Documentation
+
+API Documentation, examples and motivations can be found here -
+(Rust Docs)<https://docs.rs/stubborn-io> .
+
+Only change to the documentation in this fork will be the addition of the `ReconnectionOptions` struct, which adds `with_connection_name(name: &str)` as a method to the `StubbornTcpStream` struct. This allows for the naming of the connection, which is useful for logging purposes.
+
+If you generate the struct manually, the field name is `connection_name`.
+
+## Usage Example
 
 In this example, we will see a drop in replacement for tokio's TcpStream, with the
 distinction that it will automatically attempt to reconnect in the face of connectivity failures.
