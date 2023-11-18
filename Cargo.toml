@@ -1,21 +1,21 @@
 [package]
 name = "stubborn-io"
-version = "0.3.2"
-authors = ["David Raifaizen <david.raifaizen@protonmail.com>"]
+version = "0.4.0"
+authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
 edition = "2021"
-description = "io traits/structs that automatically recover from potential disconnections/interruptions."
+description = "Forked from https://github.com/craftytrickster/stubborn-io. io traits/structs that automatically recover from potential disconnections/interruptions."
 license = "MIT"
 keywords = ["reconnect", "retry", "stubborn", "io", "StubbornTcpStream"]
-repository = "https://github.com/craftytrickster/stubborn-io"
+repository = "https://github.com/sdr-enthusiasts/sdre-stubborn-io"
 documentation = "https://docs.rs/stubborn-io"
 readme = "README.md"
- 
+
 [dependencies]
-tokio = { version = "1", features = ["time", "net"] }
-log = "0.4"
+tokio = { version = "1.34.0", features = ["time", "net"] }
+log = "0.4.20"
 rand = "0.8"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt", "fs", "io-util"] }
-tokio-util = { version = "0.7", features = ["codec"] }
-futures = "0.3"
+tokio = { version = "1.3.40", features = ["macros", "rt", "fs", "io-util"] }
+tokio-util = { version = "0.7.10", features = ["codec"] }
+futures = "0.3.29"
