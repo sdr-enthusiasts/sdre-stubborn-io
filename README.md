@@ -1,4 +1,4 @@
-# stubborn-io
+# sdre_stubborn-io
 
 This crate provides io traits/structs that automatically recover from potential disconnections/interruptions.
 
@@ -27,7 +27,7 @@ In this example, we will see a drop in replacement for tokio's TcpStream, with t
 distinction that it will automatically attempt to reconnect in the face of connectivity failures.
 
 ```rust
-use stubborn_io::StubbornTcpStream;
+use sdre_stubborn_io::StubbornTcpStream;
 use tokio::io::AsyncWriteExt;
 
 let addr = "localhost:8080";
