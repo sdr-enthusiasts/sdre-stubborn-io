@@ -24,6 +24,8 @@ pub struct ReconnectOptions {
 
     /// Invoked when the StubbornIo fails a connection attempt
     pub on_connect_fail_callback: Box<dyn Fn() + Send + Sync>,
+
+    pub connection_name: String,
 }
 
 impl ReconnectOptions {
@@ -38,6 +40,7 @@ impl ReconnectOptions {
             on_connect_callback: Box::new(|| {}),
             on_disconnect_callback: Box::new(|| {}),
             on_connect_fail_callback: Box::new(|| {}),
+            connection_name: String::new(),
         }
     }
 

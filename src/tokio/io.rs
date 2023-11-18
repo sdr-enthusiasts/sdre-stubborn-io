@@ -117,6 +117,20 @@ impl<T, C> DerefMut for StubbornIo<T, C> {
     }
 }
 
+trait FormatName {
+    fn format_name(&self) -> String;
+}
+
+impl FormatName for String {
+    fn format_name(&self) -> String {
+        if self.trim().is_empty() {
+            String::from("StubbornIo: ")
+        } else {
+            format!("StubbornIo({}): ", self.trim())
+        }
+    }
+}
+
 impl<T, C> StubbornIo<T, C>
 where
     T: UnderlyingIo<C>,
@@ -129,19 +143,33 @@ where
         Self::connect_with_options(ctor_arg, options).await
     }
 
+    pub fn get_connection_name(&self) -> String {
+        self.options.connection_name.format_name()
+    }
+
     pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
         let tcp = match T::establish(ctor_arg.clone()).await {
             Ok(tcp) => {
-                info!("Initial connection succeeded.");
+                info!(
+                    "{}Initial connection succeeded.",
+                    options.connection_name.format_name()
+                );
                 (options.on_connect_callback)();
                 tcp
             }
             Err(e) => {
-                error!("Initial connection failed due to: {:?}.", e);
+                error!(
+                    "{}Initial connection failed due to: {:?}.",
+                    options.connection_name.format_name(),
+                    e
+                );
                 (options.on_connect_fail_callback)();
 
                 if options.exit_if_first_connect_fails {
-                    error!("Bailing after initial connection failure.");
+                    error!(
+                        "{}Bailing after initial connection failure.",
+                        options.connection_name.format_name()
+                    );
                     return Err(e);
                 }
 
@@ -151,19 +179,28 @@ where
                     let reconnect_num = i + 1;
 
                     info!(
-                        "Will re-perform initial connect attempt #{} in {:?}.",
-                        reconnect_num, duration
+                        "{}Will re-perform initial connect attempt #{} in {:?}.",
+                        options.connection_name.format_name(),
+                        reconnect_num,
+                        duration
                     );
 
                     sleep(duration).await;
 
-                    info!("Attempting reconnect #{} now.", reconnect_num);
+                    info!(
+                        "{}Attempting reconnect #{} now.",
+                        options.connection_name.format_name(),
+                        reconnect_num
+                    );
 
                     match T::establish(ctor_arg.clone()).await {
                         Ok(tcp) => {
                             result = Ok(tcp);
                             (options.on_connect_callback)();
-                            info!("Initial connection successfully established.");
+                            info!(
+                                "{}Initial connection successfully established.",
+                                options.connection_name.format_name()
+                            );
                             break;
                         }
                         Err(e) => {
@@ -176,7 +213,10 @@ where
                 match result {
                     Ok(tcp) => tcp,
                     Err(e) => {
-                        error!("No more re-connect retries remaining. Never able to establish initial connection.");
+                        error!(
+                            "{}No more re-connect retries remaining. Never able to establish initial connection.",
+                            options.connection_name.format_name()
+                        );
                         return Err(e);
                     }
                 }
@@ -195,7 +235,7 @@ where
         match &mut self.status {
             // initial disconnect
             Status::Connected => {
-                error!("Disconnect occurred");
+                error!("{}Disconnect occurred", self.get_connection_name());
                 (self.options.on_disconnect_callback)();
                 self.status = Status::Disconnected(ReconnectStatus::new(&self.options));
             }
@@ -203,18 +243,26 @@ where
                 (self.options.on_connect_fail_callback)();
             }
             Status::FailedAndExhausted => {
-                unreachable!("on_disconnect will not occur for already exhausted state.")
+                unreachable!(
+                    "{}on_disconnect will not occur for already exhausted state.",
+                    self.get_connection_name()
+                )
             }
         };
 
         let ctor_arg = self.ctor_arg.clone();
+        let connection_name = self.get_connection_name();
+        let connection_name_alt = self.get_connection_name();
 
         // this is ensured to be true now
         if let Status::Disconnected(reconnect_status) = &mut self.status {
             let next_duration = match reconnect_status.attempts_tracker.retries_remaining.next() {
                 Some(duration) => duration,
                 None => {
-                    error!("No more re-connect retries remaining. Giving up.");
+                    error!(
+                        "{}No more re-connect retries remaining. Giving up.",
+                        self.get_connection_name()
+                    );
                     self.status = Status::FailedAndExhausted;
                     cx.waker().wake_by_ref();
                     return;
@@ -228,15 +276,15 @@ where
 
             let reconnect_attempt = async move {
                 future_instant.await;
-                info!("Attempting reconnect #{} now.", cur_num);
+                info!("{} Attempting reconnect #{} now.", connection_name, cur_num);
                 T::establish(ctor_arg).await
             };
 
             reconnect_status.reconnect_attempt = Box::pin(reconnect_attempt);
 
             info!(
-                "Will perform reconnect attempt #{} in {:?}.",
-                reconnect_status.attempts_tracker.attempt_num, next_duration
+                "{} Will perform reconnect attempt #{} in {:?}.",
+                connection_name_alt, reconnect_status.attempts_tracker.attempt_num, next_duration
             );
 
             cx.waker().wake_by_ref();
@@ -255,14 +303,19 @@ where
 
         match attempt.poll(cx) {
             Poll::Ready(Ok(underlying_io)) => {
-                info!("Connection re-established");
+                info!("{}Connection re-established", self.get_connection_name());
                 cx.waker().wake_by_ref();
                 self.status = Status::Connected;
                 (self.options.on_connect_callback)();
                 self.underlying_io = underlying_io;
             }
             Poll::Ready(Err(err)) => {
-                error!("Connection attempt #{} failed: {:?}", attempt_num, err);
+                error!(
+                    "{}Connection attempt #{} failed: {:?}",
+                    self.get_connection_name(),
+                    attempt_num,
+                    err
+                );
                 self.on_disconnect(cx);
             }
             Poll::Pending => {}
