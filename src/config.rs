@@ -92,4 +92,9 @@ impl ReconnectOptions {
         self.on_connect_fail_callback = Box::new(cb);
         self
     }
+
+    pub fn with_connection_name(mut self, name: impl Into<String>) -> Self {
+        self.connection_name = name.into();
+        self
+    }
 }
