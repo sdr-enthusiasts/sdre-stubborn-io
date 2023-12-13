@@ -26,6 +26,10 @@ pub struct ReconnectOptions {
     pub on_connect_fail_callback: Box<dyn Fn() + Send + Sync>,
 
     pub connection_name: String,
+
+    /// If this is set to false (default), then the StubbornIo will NOT block
+    /// On write failures.
+    pub block_on_write_failures: bool,
 }
 
 impl ReconnectOptions {
@@ -41,6 +45,7 @@ impl ReconnectOptions {
             on_disconnect_callback: Box::new(|| {}),
             on_connect_fail_callback: Box::new(|| {}),
             connection_name: String::new(),
+            block_on_write_failures: false,
         }
     }
 
@@ -95,6 +100,11 @@ impl ReconnectOptions {
 
     pub fn with_connection_name(mut self, name: impl Into<String>) -> Self {
         self.connection_name = name.into();
+        self
+    }
+
+    pub fn with_block_on_write_failures(mut self, value: bool) -> Self {
+        self.block_on_write_failures = value;
         self
     }
 }

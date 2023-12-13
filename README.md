@@ -15,7 +15,7 @@ This project has been forked from [stubborn-io](https://github.com/craftytrickst
 ## Documentation
 
 API Documentation, examples and motivations can be found here -
-(Rust Docs)<https://docs.rs/stubborn-io> .
+(Rust Docs)<https://docs.rs/sdre-stubborn-io> .
 
 Only change to the documentation in this fork will be the addition of the `ReconnectionOptions` struct, which adds `with_connection_name(name: &str)` as a method to the `StubbornTcpStream` struct. This allows for the naming of the connection, which is useful for logging purposes.
 
