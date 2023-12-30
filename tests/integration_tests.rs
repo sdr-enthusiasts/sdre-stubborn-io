@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use stubborn_io::StubbornTcpStream;
+use sdre_stubborn_io::StubbornTcpStream;
 use tokio::{io::AsyncWriteExt, sync::oneshot};
 
 #[tokio::test]
