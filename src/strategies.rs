@@ -7,7 +7,7 @@ use std::time::Duration;
 ///
 /// ```
 /// use std::time::Duration;
-/// use stubborn_io::{ReconnectOptions, strategies::ExpBackoffStrategy};
+/// use sdre_stubborn_io::{ReconnectOptions, strategies::ExpBackoffStrategy};
 ///
 /// // With the below strategy, the stubborn-io item will try to reconnect infinitely,
 /// // waiting an exponentially increasing (by 2) value with 5% random jitter. Once the

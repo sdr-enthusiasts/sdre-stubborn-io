@@ -24,7 +24,7 @@
 //! use std::future::Future;
 //! use std::path::PathBuf;
 //! use std::pin::Pin;
-//! use stubborn_io::tokio::{StubbornIo, UnderlyingIo};
+//! use sdre_stubborn_io::tokio::{StubbornIo, UnderlyingIo};
 //! use tokio::fs::File;
 //!
 //! struct MyFile(File); // Struct must implement AsyncRead + AsyncWrite
