@@ -160,7 +160,7 @@ where
     }
 
     pub fn get_block_on_write_failures(&self) -> bool {
-        self.options.block_on_write_failures.clone()
+        self.options.block_on_write_failures
     }
 
     pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
