@@ -1,5 +1,5 @@
 use crate::config::ReconnectOptions;
-use log::{error, info};
+use log::{error, info, warn};
 use std::future::Future;
 use std::io::{self, ErrorKind, IoSlice};
 use std::marker::PhantomData;
@@ -95,12 +95,24 @@ enum Status<T, C> {
     FailedAndExhausted, // the way one feels after programming in dynamically typed languages
 }
 
+#[inline]
+fn poll_err<T>(
+    kind: ErrorKind,
+    reason: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+) -> Poll<io::Result<T>> {
+    let io_err = io::Error::new(kind, reason);
+    Poll::Ready(Err(io_err))
+}
+
 fn exhausted_err<T>() -> Poll<io::Result<T>> {
-    let io_err = io::Error::new(
+    poll_err(
         ErrorKind::NotConnected,
         "Disconnected. Connection attempts have been exhausted.",
-    );
-    Poll::Ready(Err(io_err))
+    )
+}
+
+fn disconnected_err<T>() -> Poll<io::Result<T>> {
+    poll_err(ErrorKind::NotConnected, "Underlying I/O is disconnected.")
 }
 
 impl<T, C> Deref for StubbornIo<T, C> {
@@ -145,6 +157,10 @@ where
 
     pub fn get_connection_name(&self) -> String {
         self.options.connection_name.format_name()
+    }
+
+    pub fn get_block_on_write_failures(&self) -> bool {
+        self.options.block_on_write_failures
     }
 
     pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
@@ -379,6 +395,10 @@ where
     T: UnderlyingIo<C> + AsyncWrite,
     C: Clone + Send + Unpin + 'static,
 {
+    /// Method for writing to the underlying IO item.
+    /// If the write results in a disconnect. If ReconectOptions::block_on_write_failures is true,
+    /// Poll::Pending is returned to the caller and the buffer is held. Otherwise, the write is skipped
+    /// No error is returned to the caller.
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -389,15 +409,43 @@ where
                 let poll = AsyncWrite::poll_write(Pin::new(&mut self.underlying_io), cx, buf);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    self.on_disconnect(cx);
-                    Poll::Pending
+                    if !self.get_block_on_write_failures() {
+                        error!(
+                            "{}Write disconnect detected. Skipping message",
+                            &self.get_connection_name()
+                        );
+
+                        self.on_disconnect(cx);
+                        Poll::Ready(Ok(buf.len()))
+                    } else {
+                        warn!(
+                            "{}Write disconnect detected. Blocking on write",
+                            &self.get_connection_name()
+                        );
+                        self.on_disconnect(cx);
+                        Poll::Pending
+                    }
                 } else {
                     poll
                 }
             }
             Status::Disconnected(_) => {
-                self.poll_disconnect(cx);
-                Poll::Pending
+                if !self.get_block_on_write_failures() {
+                    error!(
+                        "{}Write disconnect detected. Skipping Message",
+                        &self.get_connection_name()
+                    );
+
+                    self.poll_disconnect(cx);
+                    Poll::Ready(Ok(buf.len()))
+                } else {
+                    warn!(
+                        "{}Write disconnect detected. Blocking on write",
+                        &self.get_connection_name()
+                    );
+                    self.poll_disconnect(cx);
+                    Poll::Pending
+                }
             }
             Status::FailedAndExhausted => exhausted_err(),
         }
@@ -434,11 +482,15 @@ where
 
                 poll
             }
-            Status::Disconnected(_) => Poll::Pending,
+            Status::Disconnected(_) => disconnected_err(),
             Status::FailedAndExhausted => exhausted_err(),
         }
     }
 
+    /// Method for writing to the underlying IO item.
+    /// If the write results in a disconnect. If ReconectOptions::block_on_write_failures is true,
+    /// Poll::Pending is returned to the caller and the buffer is held. Otherwise, the write is skipped
+    /// No error is returned to the caller.
     fn poll_write_vectored(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -450,15 +502,43 @@ where
                     AsyncWrite::poll_write_vectored(Pin::new(&mut self.underlying_io), cx, bufs);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    self.on_disconnect(cx);
-                    Poll::Pending
+                    if !self.get_block_on_write_failures() {
+                        error!(
+                            "{}Write disconnect detected. Skipping message",
+                            &self.get_connection_name()
+                        );
+
+                        self.on_disconnect(cx);
+                        Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
+                    } else {
+                        warn!(
+                            "{}Write disconnect detected. Blocking on write",
+                            &self.get_connection_name()
+                        );
+                        self.on_disconnect(cx);
+                        Poll::Pending
+                    }
                 } else {
                     poll
                 }
             }
             Status::Disconnected(_) => {
-                self.poll_disconnect(cx);
-                Poll::Pending
+                if !self.get_block_on_write_failures() {
+                    error!(
+                        "{}Write disconnect detected. Skipping Message",
+                        &self.get_connection_name()
+                    );
+
+                    self.poll_disconnect(cx);
+                    Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
+                } else {
+                    warn!(
+                        "{}Write disconnect detected. Blocking on write",
+                        &self.get_connection_name()
+                    );
+                    self.poll_disconnect(cx);
+                    Poll::Pending
+                }
             }
             Status::FailedAndExhausted => exhausted_err(),
         }

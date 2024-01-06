@@ -17,7 +17,7 @@ where
 /// distinction that it will automatically attempt to reconnect in the face of connectivity failures.
 ///
 /// ```
-/// use stubborn_io::StubbornTcpStream;
+/// use sdre_stubborn_io::StubbornTcpStream;
 /// use tokio::io::AsyncWriteExt;
 ///
 /// let addr = "localhost:8080";
