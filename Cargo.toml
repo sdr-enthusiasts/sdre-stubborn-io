@@ -12,7 +12,7 @@ readme = "README.md"
 
 [dependencies]
 tokio = { version = "1.42.0", features = ["time", "net"] }
-log = "0.4.22"
+log = "0.4.24"
 rand = "0.8.5"
 
 [dev-dependencies]
