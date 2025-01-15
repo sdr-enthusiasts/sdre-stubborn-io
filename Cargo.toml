@@ -1,6 +1,6 @@
 [package]
 name = "sdre-stubborn-io"
-version = "0.5.13"
+version = "0.5.14"
 authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
 edition = "2021"
 description = "Forked from https://github.com/craftytrickster/stubborn-io. io traits/structs that automatically recover from potential disconnections/interruptions."
@@ -11,8 +11,8 @@ documentation = "https://docs.rs/sdre-stubborn-io"
 readme = "README.md"
 
 [dependencies]
-tokio = { version = "1.42.0", features = ["time", "net"] }
-log = "0.4.22"
+tokio = { version = "1.43.0", features = ["time", "net"] }
+log = "0.4.25"
 rand = "0.8.5"
 
 [dev-dependencies]
