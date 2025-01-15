@@ -286,7 +286,7 @@ checksum = "719b953e2095829ee67db738b3bfa9fa368c94900df327b3f07fe6e794d2fe1f"
 
 [[package]]
 name = "sdre-stubborn-io"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "futures",
  "log",
