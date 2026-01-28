@@ -1,6 +1,6 @@
 [package]
 name = "sdre-stubborn-io"
-version = "0.6.14"
+version = "0.6.15"
 authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
 edition = "2021"
 description = "Forked from https://github.com/craftytrickster/stubborn-io. io traits/structs that automatically recover from potential disconnections/interruptions."
