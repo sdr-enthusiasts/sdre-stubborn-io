@@ -1,5 +1,5 @@
 //! Provides the strategies used in stubborn io items
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use std::time::Duration;
 
 /// Type used for defining the exponential backoff strategy.
@@ -72,7 +72,10 @@ impl IntoIterator for ExpBackoffStrategy {
         let init = self.min.as_secs_f64();
         let rng = match self.seed {
             Some(seed) => StdRng::seed_from_u64(seed),
-            None => StdRng::from_os_rng(),
+            None => {
+                let mut thread_rng = rand::rng();
+                StdRng::from_rng(&mut thread_rng)
+            }
         };
 
         ExpBackoffIter {
