@@ -44,6 +44,17 @@ pub trait UnderlyingIo: Sized + Unpin {
 
     /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
     /// in addition to performing reconnects.
+    /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
+    /// in addition to performing reconnects.
+    ///
+    /// This is also the canonical hook for any **post-connect configuration**
+    /// that must be re-applied on every reconnect — e.g. TCP keepalive,
+    /// `TCP_NODELAY`, socket buffer sizes, TLS handshake parameters, or
+    /// application-level handshakes. Wrap the underlying constructor inside
+    /// `establish` and apply the desired configuration on the freshly-built
+    /// value before returning it. Configuration applied externally (e.g. via
+    /// `Deref` on a [`StubbornIo`]) is silently lost on reconnect; configuration
+    /// applied here is not.
     fn establish(ctx: Self::Context) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>>;
 
     /// When IO items experience an [`io::Error`] during operation, it does not necessarily mean
