@@ -9,7 +9,26 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+
+/// Run `establish` with the optional per-attempt timeout from `ReconnectOptions`.
+/// Elapsed timeouts surface as `io::ErrorKind::TimedOut` so the reconnect machinery
+/// treats them as a failed attempt and proceeds to the next backoff step.
+async fn establish_with_timeout<T: UnderlyingIo>(
+    ctx: T::Context,
+    deadline: Option<Duration>,
+) -> io::Result<T> {
+    if let Some(d) = deadline {
+        timeout(d, T::establish(ctx)).await.unwrap_or_else(|_| {
+            Err(io::Error::new(
+                ErrorKind::TimedOut,
+                "connect attempt exceeded configured connect_timeout",
+            ))
+        })
+    } else {
+        T::establish(ctx).await
+    }
+}
 
 /// Trait that should be implemented for an [`AsyncRead`] and/or [`AsyncWrite`]
 /// item to enable it to work with the [`StubbornIo`] struct.
@@ -188,7 +207,8 @@ where
         options: ReconnectOptions,
     ) -> io::Result<Self> {
         let log_prefix = format_log_prefix(&options.connection_name);
-        let tcp = match T::establish(ctor_arg.clone()).await {
+        let tcp = match establish_with_timeout::<T>(ctor_arg.clone(), options.connect_timeout).await
+        {
             Ok(tcp) => {
                 info!("{log_prefix}Initial connection succeeded.");
                 (options.on_connect_callback)();
@@ -216,7 +236,9 @@ where
 
                     info!("{log_prefix}Attempting reconnect #{reconnect_num} now.");
 
-                    match T::establish(ctor_arg.clone()).await {
+                    match establish_with_timeout::<T>(ctor_arg.clone(), options.connect_timeout)
+                        .await
+                    {
                         Ok(tcp) => {
                             result = Ok(tcp);
                             (options.on_connect_callback)();
@@ -270,6 +292,7 @@ where
         }
 
         let ctor_arg = self.ctor_arg.clone();
+        let connect_timeout = self.options.connect_timeout;
 
         // this is ensured to be true now
         if let Status::Disconnected(reconnect_status) = &mut self.status {
@@ -290,7 +313,7 @@ where
             let reconnect_attempt = async move {
                 future_instant.await;
                 info!("{log_prefix}Attempting reconnect #{cur_num} now.");
-                T::establish(ctor_arg).await
+                establish_with_timeout::<T>(ctor_arg, connect_timeout).await
             };
 
             reconnect_status.reconnect_attempt = Some(Box::pin(reconnect_attempt));

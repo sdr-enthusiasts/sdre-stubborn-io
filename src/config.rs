@@ -38,6 +38,15 @@ pub struct ReconnectOptions {
     /// If this is set to false (default), then the `StubbornIo` will NOT block
     /// on write failures.
     pub block_on_write_failures: bool,
+
+    /// Optional per-attempt connect timeout. When `Some(d)`, each invocation of
+    /// [`UnderlyingIo::establish`](crate::tokio::UnderlyingIo::establish) (initial,
+    /// initial-retry, and reconnect) is wrapped in `tokio::time::timeout(d, ...)`;
+    /// elapsing surfaces as `io::ErrorKind::TimedOut` to the reconnect machinery,
+    /// which then schedules the next attempt as if the underlying `establish` had
+    /// failed. `None` (default) preserves the prior behavior of waiting forever
+    /// on a single attempt.
+    pub connect_timeout: Option<Duration>,
 }
 
 impl Default for ReconnectOptions {
@@ -61,6 +70,7 @@ impl ReconnectOptions {
             on_connect_fail_callback: Arc::new(|| {}),
             connection_name: Arc::from(""),
             block_on_write_failures: false,
+            connect_timeout: None,
         }
     }
 
@@ -135,6 +145,15 @@ impl ReconnectOptions {
     #[must_use]
     pub const fn with_block_on_write_failures(mut self, value: bool) -> Self {
         self.block_on_write_failures = value;
+        self
+    }
+
+    /// Sets a per-attempt timeout applied to every call to
+    /// [`UnderlyingIo::establish`](crate::tokio::UnderlyingIo::establish). Pass
+    /// `None` to disable (default).
+    #[must_use]
+    pub const fn with_connect_timeout(mut self, timeout: Option<Duration>) -> Self {
+        self.connect_timeout = timeout;
         self
     }
 }
