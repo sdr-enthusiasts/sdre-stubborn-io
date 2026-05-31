@@ -89,29 +89,33 @@ pub enum WriteFailurePolicy {
 }
 
 /// User specified options that control the behavior of the stubborn-io upon disconnect.
+///
+/// All fields are crate-private; configure through the builder methods on this
+/// type (`with_*`). The struct is intentionally opaque so the builder remains
+/// the single supported API surface.
 pub struct ReconnectOptions {
     /// Represents a function that generates an `Iterator`
     /// to schedule the wait between reconnection attempts.
-    pub retries_to_attempt_fn: Box<dyn Fn() -> DurationIterator + Send + Sync>,
+    pub(crate) retries_to_attempt_fn: Box<dyn Fn() -> DurationIterator + Send + Sync>,
 
     /// If this is set to true, if the initial connect method of the stubborn-io item fails,
     /// then no further reconnects will be attempted.
-    pub exit_if_first_connect_fails: bool,
+    pub(crate) exit_if_first_connect_fails: bool,
 
     /// Invoked for every [`ReconnectEvent`] over the lifetime of this connection.
     /// Defaults to a no-op. See [`Self::with_event_callback`].
-    pub event_callback: EventCallback,
+    pub(crate) event_callback: EventCallback,
 
     /// Identifier for this connection, used in log messages.
     ///
     /// Stored as `Arc<str>` so that the formatted log prefix (held internally by
     /// `StubbornIo`) and any clones share a single allocation.
-    pub connection_name: Arc<str>,
+    pub(crate) connection_name: Arc<str>,
 
     /// Strategy for handling writes that arrive while disconnected, or whose
     /// underlying poll revealed a disconnect. Defaults to
     /// [`WriteFailurePolicy::Backpressure`].
-    pub write_failure_policy: WriteFailurePolicy,
+    pub(crate) write_failure_policy: WriteFailurePolicy,
 
     /// Optional per-attempt connect timeout. When `Some(d)`, each invocation of
     /// [`UnderlyingIo::establish`](crate::tokio::UnderlyingIo::establish) (initial,
@@ -120,7 +124,7 @@ pub struct ReconnectOptions {
     /// which then schedules the next attempt as if the underlying `establish` had
     /// failed. `None` (default) preserves the prior behavior of waiting forever
     /// on a single attempt.
-    pub connect_timeout: Option<Duration>,
+    pub(crate) connect_timeout: Option<Duration>,
 }
 
 impl Default for ReconnectOptions {
@@ -200,9 +204,12 @@ impl ReconnectOptions {
     }
 
     /// Sets the human-readable name used in log lines for this connection.
+    ///
+    /// Accepts anything convertible into `Arc<str>` — `&str` and `String`
+    /// allocate; an existing `Arc<str>` is moved without copying.
     #[must_use]
-    pub fn with_connection_name(mut self, name: impl AsRef<str>) -> Self {
-        self.connection_name = Arc::from(name.as_ref());
+    pub fn with_connection_name(mut self, name: impl Into<Arc<str>>) -> Self {
+        self.connection_name = name.into();
         self
     }
 

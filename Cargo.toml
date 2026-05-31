@@ -1,6 +1,6 @@
 [package]
 name = "sdre-stubborn-io"
-version = "0.7.0"
+version = "0.7.1"
 authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
 edition = "2024"
 rust-version = "1.85"

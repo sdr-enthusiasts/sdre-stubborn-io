@@ -54,7 +54,11 @@
               # Packages that git-hooks.nix / mkCheck say we need
               corePkgs = chk.enabledPackages or [ ];
 
-              # Extra Rust / tooling packages (NO extra rustc here)
+              # Extra Rust / tooling packages (NO rustc/cargo/clippy here — those
+              # come from extraDev's unified toolchain. cargo-deny / cargo-machete /
+              # cargo-make are standalone binaries from nixpkgs and won't shadow
+              # the unified toolchain as long as extraDev appears first in
+              # buildInputs below.)
               extraRustTools = [
                 pkgs.cargo-deny
                 pkgs.cargo-machete
@@ -62,7 +66,12 @@
                 pkgs.markdownlint-cli2
               ];
 
-              # Extra dev packages provided by mkCheck (includes rustToolchain)
+              # Extra dev packages provided by mkCheck (includes rustToolchain).
+              # MUST appear first in buildInputs so its cargo/clippy/rustc
+              # outrank the older versions transitively pulled in by the
+              # nixpkgs cargo-* helpers above. Otherwise cargo and clippy end
+              # up on different rustc versions and you get E0514 on every
+              # `cargo clippy` after a `cargo build`.
               extraDev = chk.passthru.devPackages or [ ];
 
               # Library path packages: whatever mkCheck wants + your GL/Wayland bits
@@ -70,7 +79,7 @@
             in
             {
               default = pkgs.mkShell {
-                buildInputs = extraRustTools ++ corePkgs ++ extraDev;
+                buildInputs = extraDev ++ corePkgs ++ extraRustTools;
 
                 LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libPkgs;
 

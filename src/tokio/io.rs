@@ -44,8 +44,6 @@ pub trait UnderlyingIo: Sized + Unpin {
 
     /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
     /// in addition to performing reconnects.
-    /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
-    /// in addition to performing reconnects.
     ///
     /// This is also the canonical hook for any **post-connect configuration**
     /// that must be re-applied on every reconnect — e.g. TCP keepalive,
@@ -314,8 +312,7 @@ where
         })
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut)] // cx is borrowed only via &-projection
-    fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
+    fn on_disconnect(mut self: Pin<&mut Self>, cx: &Context<'_>) {
         let prefix = Arc::clone(&self.log_prefix);
         match &mut self.status {
             // initial disconnect
