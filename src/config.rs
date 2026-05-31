@@ -2,6 +2,7 @@
 //! specifically related to reconnect behavior.
 
 use crate::strategies::ExpBackoffStrategy;
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,6 +10,59 @@ use std::time::Duration;
 ///
 /// Only `Send` is required: the iterator is owned and advanced by a single task.
 pub type DurationIterator = Box<dyn Iterator<Item = Duration> + Send>;
+
+/// Events emitted by [`StubbornIo`](crate::tokio::StubbornIo) over the lifetime of
+/// a connection. Delivered to the single observer installed via
+/// [`ReconnectOptions::with_event_callback`].
+///
+/// Borrowed payloads (e.g. error references) are scoped to the callback invocation;
+/// implementations that need to retain data must clone it.
+///
+/// Non-exhaustive so new variants can be added without breaking existing matches.
+#[non_exhaustive]
+#[derive(Debug)]
+pub enum ReconnectEvent<'a> {
+    /// A (re)connection just completed successfully.
+    ///
+    /// `attempt` is 0 for the initial connect, and `n >= 1` for the n-th reconnect
+    /// (or the n-th retry of the initial connect after an initial failure).
+    Connected {
+        /// 0 = initial connect; >= 1 = (re)connect attempt count.
+        attempt: usize,
+    },
+    /// An established connection was lost; the reconnect machinery is engaging.
+    Disconnected,
+    /// A connect or reconnect attempt failed. `attempt` is the same counter as
+    /// [`Self::Connected::attempt`].
+    ConnectFailed {
+        /// The error returned by `UnderlyingIo::establish` (or surfaced by the
+        /// per-attempt connect timeout).
+        error: &'a io::Error,
+        /// Which attempt failed (0 = initial).
+        attempt: usize,
+    },
+    /// A reconnect attempt has been scheduled and will run after `delay`.
+    ReconnectScheduled {
+        /// Which attempt is being scheduled.
+        attempt: usize,
+        /// How long the machinery will sleep before invoking `establish` again.
+        delay: Duration,
+    },
+    /// A write was issued while the stream was not Connected, and the configured
+    /// [`WriteFailurePolicy::DropAndNotify`](crate::config::WriteFailurePolicy)
+    /// caused the bytes to be discarded.
+    WriteWhileDisconnected {
+        /// Number of bytes the caller asked to write and the crate dropped.
+        bytes_dropped: usize,
+    },
+    /// The retries iterator has been exhausted and the stream has entered the
+    /// terminal `FailedAndExhausted` state. No further events will be emitted.
+    Exhausted,
+}
+
+/// Receiver for [`ReconnectEvent`]s. Stored as an `Arc<dyn Fn>` on
+/// [`ReconnectOptions`] so it can be cheaply cloned into reconnect futures.
+pub type EventCallback = Arc<dyn for<'a> Fn(ReconnectEvent<'a>) + Send + Sync>;
 
 /// How [`StubbornIo`](crate::tokio::StubbornIo) should treat write requests issued
 /// while the underlying connection is down (or while a write itself revealed the
@@ -44,14 +98,9 @@ pub struct ReconnectOptions {
     /// then no further reconnects will be attempted.
     pub exit_if_first_connect_fails: bool,
 
-    /// Invoked when the `StubbornIo` establishes a connection.
-    pub on_connect_callback: Arc<dyn Fn() + Send + Sync>,
-
-    /// Invoked when the `StubbornIo` loses its active connection.
-    pub on_disconnect_callback: Arc<dyn Fn() + Send + Sync>,
-
-    /// Invoked when the `StubbornIo` fails a connection attempt.
-    pub on_connect_fail_callback: Arc<dyn Fn() + Send + Sync>,
+    /// Invoked for every [`ReconnectEvent`] over the lifetime of this connection.
+    /// Defaults to a no-op. See [`Self::with_event_callback`].
+    pub event_callback: EventCallback,
 
     /// Identifier for this connection, used in log messages.
     ///
@@ -90,9 +139,7 @@ impl ReconnectOptions {
         Self {
             retries_to_attempt_fn: Box::new(|| Box::new(ExpBackoffStrategy::default().into_iter())),
             exit_if_first_connect_fails: true,
-            on_connect_callback: Arc::new(|| {}),
-            on_disconnect_callback: Arc::new(|| {}),
-            on_connect_fail_callback: Arc::new(|| {}),
+            event_callback: Arc::new(|_| {}),
             connection_name: Arc::from(""),
             write_failure_policy: WriteFailurePolicy::Backpressure,
             connect_timeout: None,
@@ -137,24 +184,18 @@ impl ReconnectOptions {
         self
     }
 
-    /// Sets the callback invoked on every successful (re)connect.
+    /// Sets the single observer invoked for every [`ReconnectEvent`].
+    ///
+    /// Replaces the prior `with_on_connect_callback` /
+    /// `with_on_disconnect_callback` / `with_on_connect_fail_callback` trio.
+    /// The callback is stored in an `Arc` and is cloned into each scheduled
+    /// reconnect future, so it must be `Send + Sync + 'static`.
     #[must_use]
-    pub fn with_on_connect_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_connect_callback = Arc::new(cb);
-        self
-    }
-
-    /// Sets the callback invoked when the active connection is lost.
-    #[must_use]
-    pub fn with_on_disconnect_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_disconnect_callback = Arc::new(cb);
-        self
-    }
-
-    /// Sets the callback invoked when a connect/reconnect attempt fails.
-    #[must_use]
-    pub fn with_on_connect_fail_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_connect_fail_callback = Arc::new(cb);
+    pub fn with_event_callback(
+        mut self,
+        cb: impl for<'a> Fn(ReconnectEvent<'a>) + Send + Sync + 'static,
+    ) -> Self {
+        self.event_callback = Arc::new(cb);
         self
     }
 

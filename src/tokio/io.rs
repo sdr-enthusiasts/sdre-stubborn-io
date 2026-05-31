@@ -1,4 +1,4 @@
-use crate::config::{ReconnectOptions, WriteFailurePolicy, format_log_prefix};
+use crate::config::{ReconnectEvent, ReconnectOptions, WriteFailurePolicy, format_log_prefix};
 use log::{error, info, warn};
 use std::future::Future;
 use std::io::{self, ErrorKind, IoSlice};
@@ -222,16 +222,21 @@ where
         options: ReconnectOptions,
     ) -> io::Result<Self> {
         let log_prefix = format_log_prefix(&options.connection_name);
+        let emit = |ev: ReconnectEvent<'_>| (options.event_callback)(ev);
+
         let tcp = match establish_with_timeout::<T>(ctor_arg.clone(), options.connect_timeout).await
         {
             Ok(tcp) => {
                 info!("{log_prefix}Initial connection succeeded.");
-                (options.on_connect_callback)();
+                emit(ReconnectEvent::Connected { attempt: 0 });
                 tcp
             }
             Err(e) => {
                 error!("{log_prefix}Initial connection failed due to: {e:?}.");
-                (options.on_connect_fail_callback)();
+                emit(ReconnectEvent::ConnectFailed {
+                    error: &e,
+                    attempt: 0,
+                });
 
                 if options.exit_if_first_connect_fails {
                     error!("{log_prefix}Bailing after initial connection failure.");
@@ -243,7 +248,11 @@ where
                 for (i, duration) in (options.retries_to_attempt_fn)().enumerate() {
                     let reconnect_num = i + 1;
 
-                    info!(
+                    emit(ReconnectEvent::ReconnectScheduled {
+                        attempt: reconnect_num,
+                        delay: duration,
+                    });
+                    warn!(
                         "{log_prefix}Will re-perform initial connect attempt #{reconnect_num} in {duration:?}."
                     );
 
@@ -255,13 +264,18 @@ where
                         .await
                     {
                         Ok(tcp) => {
-                            result = Ok(tcp);
-                            (options.on_connect_callback)();
+                            emit(ReconnectEvent::Connected {
+                                attempt: reconnect_num,
+                            });
                             info!("{log_prefix}Initial connection successfully established.");
+                            result = Ok(tcp);
                             break;
                         }
                         Err(e) => {
-                            (options.on_connect_fail_callback)();
+                            emit(ReconnectEvent::ConnectFailed {
+                                error: &e,
+                                attempt: reconnect_num,
+                            });
                             result = Err(e);
                         }
                     }
@@ -270,6 +284,7 @@ where
                 match result {
                     Ok(tcp) => tcp,
                     Err(e) => {
+                        emit(ReconnectEvent::Exhausted);
                         error!(
                             "{log_prefix}No more re-connect retries remaining. Never able to establish initial connection."
                         );
@@ -288,19 +303,20 @@ where
         })
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut)] // cx will become &Context in D7 rework
+    #[allow(clippy::needless_pass_by_ref_mut)] // cx is borrowed only via &-projection
     fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
         let prefix = Arc::clone(&self.log_prefix);
         match &mut self.status {
             // initial disconnect
             Status::Connected => {
                 error!("{prefix}Disconnect occurred");
-                (self.options.on_disconnect_callback)();
+                (self.options.event_callback)(ReconnectEvent::Disconnected);
                 self.status = Status::Disconnected(ReconnectStatus::new(&self.options));
             }
-            Status::Disconnected(_) => {
-                (self.options.on_connect_fail_callback)();
-            }
+            // Already disconnected; a previous reconnect attempt failed. The
+            // ConnectFailed event was emitted at the call site (poll_disconnect)
+            // where the error is in scope. No additional emit here.
+            Status::Disconnected(_) => {}
             Status::FailedAndExhausted | Status::Closed => {
                 unreachable!("{prefix}on_disconnect will not occur for already-terminal state.")
             }
@@ -314,6 +330,7 @@ where
             let Some(next_duration) = reconnect_status.attempts_tracker.retries_remaining.next()
             else {
                 error!("{prefix}No more re-connect retries remaining. Giving up.");
+                (self.options.event_callback)(ReconnectEvent::Exhausted);
                 self.status = Status::FailedAndExhausted;
                 cx.waker().wake_by_ref();
                 return;
@@ -334,6 +351,10 @@ where
             reconnect_status.reconnect_attempt = Some(Box::pin(reconnect_attempt));
 
             info!("{prefix}Will perform reconnect attempt #{cur_num} in {next_duration:?}.");
+            (self.options.event_callback)(ReconnectEvent::ReconnectScheduled {
+                attempt: cur_num,
+                delay: next_duration,
+            });
 
             cx.waker().wake_by_ref();
         }
@@ -357,11 +378,17 @@ where
                 info!("{prefix}Connection re-established");
                 cx.waker().wake_by_ref();
                 self.status = Status::Connected;
-                (self.options.on_connect_callback)();
+                (self.options.event_callback)(ReconnectEvent::Connected {
+                    attempt: attempt_num,
+                });
                 self.underlying_io = underlying_io;
             }
             Poll::Ready(Err(err)) => {
                 error!("{prefix}Connection attempt #{attempt_num} failed: {err:?}");
+                (self.options.event_callback)(ReconnectEvent::ConnectFailed {
+                    error: &err,
+                    attempt: attempt_num,
+                });
                 self.on_disconnect(cx);
             }
             Poll::Pending => {}
@@ -457,6 +484,9 @@ where
                                 "{prefix}Write disconnect detected. Dropping {} byte(s)",
                                 buf.len()
                             );
+                            (self.options.event_callback)(ReconnectEvent::WriteWhileDisconnected {
+                                bytes_dropped: buf.len(),
+                            });
                             self.on_disconnect(cx);
                             Poll::Ready(Ok(buf.len()))
                         }
@@ -476,6 +506,9 @@ where
                         "{prefix}Write while disconnected. Dropping {} byte(s)",
                         buf.len()
                     );
+                    (self.options.event_callback)(ReconnectEvent::WriteWhileDisconnected {
+                        bytes_dropped: buf.len(),
+                    });
                     self.poll_disconnect(cx);
                     Poll::Ready(Ok(buf.len()))
                 }
@@ -563,6 +596,9 @@ where
                                 "{prefix}Write disconnect detected. Dropping {total} byte(s) across {} buffer(s)",
                                 bufs.len()
                             );
+                            (self.options.event_callback)(ReconnectEvent::WriteWhileDisconnected {
+                                bytes_dropped: total,
+                            });
                             self.on_disconnect(cx);
                             Poll::Ready(Ok(total))
                         }
@@ -582,6 +618,9 @@ where
                         "{prefix}Write while disconnected. Dropping {total} byte(s) across {} buffer(s)",
                         bufs.len()
                     );
+                    (self.options.event_callback)(ReconnectEvent::WriteWhileDisconnected {
+                        bytes_dropped: total,
+                    });
                     self.poll_disconnect(cx);
                     Poll::Ready(Ok(total))
                 }

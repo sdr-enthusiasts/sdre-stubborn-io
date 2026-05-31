@@ -3,6 +3,7 @@
 #![allow(clippy::significant_drop_tightening, clippy::use_self)]
 
 use sdre_stubborn_io::ReconnectOptions;
+use sdre_stubborn_io::config::ReconnectEvent;
 use sdre_stubborn_io::tokio::{StubbornIo, UnderlyingIo};
 use std::future::Future;
 use std::io::{self, ErrorKind};
@@ -138,8 +139,10 @@ pub mod instantiating {
         let options = ReconnectOptions::new()
             .with_retries_generator(|| vec![Duration::from_millis(100)])
             .with_exit_if_first_connect_fails(false)
-            .with_on_connect_fail_callback(move || {
-                disconnect_clone.fetch_add(1, Ordering::Relaxed);
+            .with_event_callback(move |ev| {
+                if let ReconnectEvent::ConnectFailed { .. } = ev {
+                    disconnect_clone.fetch_add(1, Ordering::Relaxed);
+                }
             });
 
         let dummy = StubbornDummy::connect_with_options(ctor, options).await;
@@ -162,8 +165,10 @@ pub mod instantiating {
         let options = ReconnectOptions::new()
             .with_exit_if_first_connect_fails(false)
             .with_retries_generator(|| vec![Duration::from_millis(100)])
-            .with_on_connect_fail_callback(move || {
-                disconnect_clone.fetch_add(1, Ordering::Relaxed);
+            .with_event_callback(move |ev| {
+                if let ReconnectEvent::ConnectFailed { .. } = ev {
+                    disconnect_clone.fetch_add(1, Ordering::Relaxed);
+                }
             });
 
         let dummy = StubbornDummy::connect_with_options(ctor, options).await;
@@ -234,8 +239,10 @@ mod already_connected {
         let disconnect_clone = disconnect_counter.clone();
 
         let options = ReconnectOptions::new()
-            .with_on_disconnect_callback(move || {
-                disconnect_clone.fetch_add(1, Ordering::Relaxed);
+            .with_event_callback(move |ev| {
+                if matches!(ev, ReconnectEvent::Disconnected) {
+                    disconnect_clone.fetch_add(1, Ordering::Relaxed);
+                }
             })
             .with_retries_generator(|| {
                 vec![
