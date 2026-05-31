@@ -6,15 +6,44 @@ on:
       - main
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-
+  fmt:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4.2.2
-      - uses: hecrj/setup-rust-action@v2.0.1
-      - name: Format check
-        run: cargo fmt  -- --check
-      - name: Build and Lint
-        run: cargo clippy --tests -- -D warnings
-      - name: Run tests
-        run: cargo test --verbose
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-features --verbose
+
+  doc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  msrv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo build --all-features
+      - run: cargo test --all-features

@@ -1,3 +1,7 @@
+// Allowances scoped to legacy tests; full rewrite pending under D12.
+#![allow(missing_docs)]
+#![allow(dead_code, clippy::collection_is_never_read)]
+
 use std::time::Duration;
 
 use sdre_stubborn_io::StubbornTcpStream;

@@ -10,40 +10,38 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::time::sleep;
 
-/// Trait that should be implemented for an [AsyncRead] and/or [AsyncWrite]
-/// item to enable it to work with the [StubbornIo] struct.
+/// Trait that should be implemented for an [`AsyncRead`] and/or [`AsyncWrite`]
+/// item to enable it to work with the [`StubbornIo`] struct.
 pub trait UnderlyingIo<C>: Sized + Unpin
 where
     C: Clone + Send + Unpin,
 {
-    /// The creation function is used by StubbornIo in order to establish both the initial IO connection
+    /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
     /// in addition to performing reconnects.
     fn establish(ctor_arg: C) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>>;
 
-    /// When IO items experience an [io::Error](io::Error) during operation, it does not necessarily mean
-    /// it is a disconnect/termination (ex: WouldBlock). This trait provides sensible defaults to classify
+    /// When IO items experience an [`io::Error`] during operation, it does not necessarily mean
+    /// it is a disconnect/termination (ex: `WouldBlock`). This trait provides sensible defaults to classify
     /// which errors are considered "disconnects", but this can be overridden based on the user's needs.
     fn is_disconnect_error(&self, err: &io::Error) -> bool {
-        use std::io::ErrorKind::*;
-
         matches!(
             err.kind(),
-            NotFound
-                | PermissionDenied
-                | ConnectionRefused
-                | ConnectionReset
-                | ConnectionAborted
-                | NotConnected
-                | AddrInUse
-                | AddrNotAvailable
-                | BrokenPipe
-                | AlreadyExists
+            ErrorKind::NotFound
+                | ErrorKind::PermissionDenied
+                | ErrorKind::ConnectionRefused
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::NotConnected
+                | ErrorKind::AddrInUse
+                | ErrorKind::AddrNotAvailable
+                | ErrorKind::BrokenPipe
+                | ErrorKind::AlreadyExists
         )
     }
 
-    /// If the underlying IO item implements AsyncRead, this method allows the user to specify
+    /// If the underlying IO item implements `AsyncRead`, this method allows the user to specify
     /// if a technically successful read actually means that the connect is closed.
-    /// For example, tokio's TcpStream successfully performs a read of 0 bytes when closed.
+    /// For example, tokio's `TcpStream` successfully performs a read of 0 bytes when closed.
     fn is_final_read(&self, bytes_read: usize) -> bool {
         // definitely true for tcp, perhaps true for other io as well,
         // indicative of EOF hit
@@ -67,8 +65,8 @@ where
     T: UnderlyingIo<C>,
     C: Clone + Send + Unpin + 'static,
 {
-    pub fn new(options: &ReconnectOptions) -> Self {
-        ReconnectStatus {
+    pub(crate) fn new(options: &ReconnectOptions) -> Self {
+        Self {
             attempts_tracker: AttemptsTracker {
                 attempt_num: 0,
                 retries_remaining: (options.retries_to_attempt_fn)(),
@@ -79,8 +77,9 @@ where
     }
 }
 
-/// The StubbornIo is a wrapper over a tokio AsyncRead/AsyncWrite item that will automatically
-/// invoke the [UnderlyingIo::establish] upon initialization and when a reconnect is needed.
+/// Wrapper over a tokio `AsyncRead`/`AsyncWrite` item that will automatically
+/// invoke the [`UnderlyingIo::establish`] upon initialization and when a reconnect is needed.
+///
 /// Because it implements deref, you are able to invoke all of the original methods on the wrapped IO.
 pub struct StubbornIo<T, C> {
     status: Status<T, C>,
@@ -92,7 +91,7 @@ pub struct StubbornIo<T, C> {
 enum Status<T, C> {
     Connected,
     Disconnected(ReconnectStatus<T, C>),
-    FailedAndExhausted, // the way one feels after programming in dynamically typed languages
+    FailedAndExhausted,
 }
 
 #[inline]
@@ -136,7 +135,7 @@ trait FormatName {
 impl FormatName for String {
     fn format_name(&self) -> String {
         if self.trim().is_empty() {
-            String::from("StubbornIo: ")
+            Self::from("StubbornIo: ")
         } else {
             format!("StubbornIo({}): ", self.trim())
         }
@@ -148,21 +147,26 @@ where
     T: UnderlyingIo<C>,
     C: Clone + Send + Unpin + 'static,
 {
-    /// Connects or creates a handle to the UnderlyingIo item,
+    /// Connects or creates a handle to the `UnderlyingIo` item,
     /// using the default reconnect options.
     pub async fn connect(ctor_arg: C) -> io::Result<Self> {
         let options = ReconnectOptions::new();
         Self::connect_with_options(ctor_arg, options).await
     }
 
+    /// Returns the connection name as it will appear in log messages, e.g. `StubbornIo(foo): `.
+    #[must_use]
     pub fn get_connection_name(&self) -> String {
         self.options.connection_name.format_name()
     }
 
-    pub fn get_block_on_write_failures(&self) -> bool {
+    /// Returns the current `block_on_write_failures` setting from `ReconnectOptions`.
+    #[must_use]
+    pub const fn get_block_on_write_failures(&self) -> bool {
         self.options.block_on_write_failures
     }
 
+    /// Connects (or attempts to reconnect) using the supplied [`ReconnectOptions`].
     pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
         let tcp = match T::establish(ctor_arg.clone()).await {
             Ok(tcp) => {
@@ -239,7 +243,7 @@ where
             }
         };
 
-        Ok(StubbornIo {
+        Ok(Self {
             status: Status::Connected,
             ctor_arg,
             underlying_io: tcp,
@@ -247,7 +251,8 @@ where
         })
     }
 
-    fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context) {
+    #[allow(clippy::needless_pass_by_ref_mut)] // cx will become &Context in D7 rework
+    fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
         match &mut self.status {
             // initial disconnect
             Status::Connected => {
@@ -264,7 +269,7 @@ where
                     self.get_connection_name()
                 )
             }
-        };
+        }
 
         let ctor_arg = self.ctor_arg.clone();
         let connection_name = self.get_connection_name();
@@ -272,17 +277,15 @@ where
 
         // this is ensured to be true now
         if let Status::Disconnected(reconnect_status) = &mut self.status {
-            let next_duration = match reconnect_status.attempts_tracker.retries_remaining.next() {
-                Some(duration) => duration,
-                None => {
-                    error!(
-                        "{}No more re-connect retries remaining. Giving up.",
-                        self.get_connection_name()
-                    );
-                    self.status = Status::FailedAndExhausted;
-                    cx.waker().wake_by_ref();
-                    return;
-                }
+            let Some(next_duration) = reconnect_status.attempts_tracker.retries_remaining.next()
+            else {
+                error!(
+                    "{}No more re-connect retries remaining. Giving up.",
+                    self.get_connection_name()
+                );
+                self.status = Status::FailedAndExhausted;
+                cx.waker().wake_by_ref();
+                return;
             };
 
             let future_instant = sleep(next_duration);
@@ -292,7 +295,7 @@ where
 
             let reconnect_attempt = async move {
                 future_instant.await;
-                info!("{}Attempting reconnect #{} now.", connection_name, cur_num);
+                info!("{connection_name}Attempting reconnect #{cur_num} now.");
                 T::establish(ctor_arg).await
             };
 
@@ -307,14 +310,13 @@ where
         }
     }
 
-    fn poll_disconnect(mut self: Pin<&mut Self>, cx: &mut Context) {
+    fn poll_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
         let (attempt, attempt_num) = match &mut self.status {
-            Status::Connected => unreachable!(),
-            Status::Disconnected(ref mut status) => (
+            Status::Connected | Status::FailedAndExhausted => unreachable!(),
+            Status::Disconnected(status) => (
                 Pin::new(&mut status.reconnect_attempt),
                 status.attempts_tracker.attempt_num,
             ),
-            Status::FailedAndExhausted => unreachable!(),
         };
 
         match attempt.poll(cx) {
@@ -396,8 +398,8 @@ where
     C: Clone + Send + Unpin + 'static,
 {
     /// Method for writing to the underlying IO item.
-    /// If the write results in a disconnect. If ReconectOptions::block_on_write_failures is true,
-    /// Poll::Pending is returned to the caller and the buffer is held. Otherwise, the write is skipped
+    /// If the write results in a disconnect: when `ReconnectOptions::block_on_write_failures` is true,
+    /// `Poll::Pending` is returned to the caller and the buffer is held. Otherwise, the write is skipped.
     /// No error is returned to the caller.
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -409,7 +411,14 @@ where
                 let poll = AsyncWrite::poll_write(Pin::new(&mut self.underlying_io), cx, buf);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    if !self.get_block_on_write_failures() {
+                    if self.get_block_on_write_failures() {
+                        warn!(
+                            "{}Write disconnect detected. Blocking on write",
+                            &self.get_connection_name()
+                        );
+                        self.on_disconnect(cx);
+                        Poll::Pending
+                    } else {
                         error!(
                             "{}Write disconnect detected. Skipping message",
                             &self.get_connection_name()
@@ -417,20 +426,20 @@ where
 
                         self.on_disconnect(cx);
                         Poll::Ready(Ok(buf.len()))
-                    } else {
-                        warn!(
-                            "{}Write disconnect detected. Blocking on write",
-                            &self.get_connection_name()
-                        );
-                        self.on_disconnect(cx);
-                        Poll::Pending
                     }
                 } else {
                     poll
                 }
             }
             Status::Disconnected(_) => {
-                if !self.get_block_on_write_failures() {
+                if self.get_block_on_write_failures() {
+                    warn!(
+                        "{}Write disconnect detected. Blocking on write",
+                        &self.get_connection_name()
+                    );
+                    self.poll_disconnect(cx);
+                    Poll::Pending
+                } else {
                     error!(
                         "{}Write disconnect detected. Skipping Message",
                         &self.get_connection_name()
@@ -438,13 +447,6 @@ where
 
                     self.poll_disconnect(cx);
                     Poll::Ready(Ok(buf.len()))
-                } else {
-                    warn!(
-                        "{}Write disconnect detected. Blocking on write",
-                        &self.get_connection_name()
-                    );
-                    self.poll_disconnect(cx);
-                    Poll::Pending
                 }
             }
             Status::FailedAndExhausted => exhausted_err(),
@@ -488,8 +490,8 @@ where
     }
 
     /// Method for writing to the underlying IO item.
-    /// If the write results in a disconnect. If ReconectOptions::block_on_write_failures is true,
-    /// Poll::Pending is returned to the caller and the buffer is held. Otherwise, the write is skipped
+    /// If the write results in a disconnect: when `ReconnectOptions::block_on_write_failures` is true,
+    /// `Poll::Pending` is returned to the caller and the buffer is held. Otherwise, the write is skipped.
     /// No error is returned to the caller.
     fn poll_write_vectored(
         mut self: Pin<&mut Self>,
@@ -502,7 +504,14 @@ where
                     AsyncWrite::poll_write_vectored(Pin::new(&mut self.underlying_io), cx, bufs);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    if !self.get_block_on_write_failures() {
+                    if self.get_block_on_write_failures() {
+                        warn!(
+                            "{}Write disconnect detected. Blocking on write",
+                            &self.get_connection_name()
+                        );
+                        self.on_disconnect(cx);
+                        Poll::Pending
+                    } else {
                         error!(
                             "{}Write disconnect detected. Skipping message",
                             &self.get_connection_name()
@@ -510,20 +519,20 @@ where
 
                         self.on_disconnect(cx);
                         Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
-                    } else {
-                        warn!(
-                            "{}Write disconnect detected. Blocking on write",
-                            &self.get_connection_name()
-                        );
-                        self.on_disconnect(cx);
-                        Poll::Pending
                     }
                 } else {
                     poll
                 }
             }
             Status::Disconnected(_) => {
-                if !self.get_block_on_write_failures() {
+                if self.get_block_on_write_failures() {
+                    warn!(
+                        "{}Write disconnect detected. Blocking on write",
+                        &self.get_connection_name()
+                    );
+                    self.poll_disconnect(cx);
+                    Poll::Pending
+                } else {
                     error!(
                         "{}Write disconnect detected. Skipping Message",
                         &self.get_connection_name()
@@ -531,13 +540,6 @@ where
 
                     self.poll_disconnect(cx);
                     Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
-                } else {
-                    warn!(
-                        "{}Write disconnect detected. Blocking on write",
-                        &self.get_connection_name()
-                    );
-                    self.poll_disconnect(cx);
-                    Poll::Pending
                 }
             }
             Status::FailedAndExhausted => exhausted_err(),

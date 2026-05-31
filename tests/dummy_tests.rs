@@ -1,11 +1,15 @@
-use sdre_stubborn_io::tokio::{StubbornIo, UnderlyingIo};
+// Allowances scoped to legacy tests; full rewrite pending under D12.
+#![allow(missing_docs)]
+#![allow(clippy::significant_drop_tightening, clippy::use_self)]
+
 use sdre_stubborn_io::ReconnectOptions;
+use sdre_stubborn_io::tokio::{StubbornIo, UnderlyingIo};
 use std::future::Future;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};

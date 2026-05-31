@@ -2,10 +2,12 @@
 name = "sdre-stubborn-io"
 version = "0.7.0"
 authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 description = "Forked from https://github.com/craftytrickster/stubborn-io. io traits/structs that automatically recover from potential disconnections/interruptions."
 license = "MIT"
 keywords = ["reconnect", "retry", "stubborn", "io", "StubbornTcpStream"]
+categories = ["network-programming", "asynchronous"]
 repository = "https://github.com/sdr-enthusiasts/sdre-stubborn-io"
 documentation = "https://docs.rs/sdre-stubborn-io"
 readme = "README.md"
@@ -19,3 +21,19 @@ rand = "0.10.1"
 tokio = { version = "1.52.3", features = ["macros", "rt", "fs", "io-util"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
 futures = "0.3.32"
+
+[lints.rust]
+unsafe_code      = "forbid"
+missing_docs     = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub  = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery  = { level = "warn", priority = -1 }
+cargo    = { level = "warn", priority = -1 }
+# explicit opt-outs
+module_name_repetitions = "allow"
+missing_errors_doc      = "allow"
+# transitive deps (mio/tokio/etc) pull in multiple versions; out of our control
+multiple_crate_versions = "allow"

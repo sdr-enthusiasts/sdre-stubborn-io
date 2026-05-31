@@ -1,8 +1,9 @@
-//! Provides the strategies used in stubborn io items
-use rand::{rngs::StdRng, RngExt, SeedableRng};
+//! Provides the strategies used in stubborn io items.
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::time::Duration;
 
 /// Type used for defining the exponential backoff strategy.
+///
 /// # Examples
 ///
 /// ```
@@ -28,7 +29,10 @@ pub struct ExpBackoffStrategy {
 }
 
 impl ExpBackoffStrategy {
-    pub fn new(min: Duration, factor: f64, jitter: f64) -> Self {
+    /// Construct a new exponential-backoff strategy with the given minimum wait,
+    /// growth factor, and fractional jitter (e.g. `0.05` = ±5%).
+    #[must_use]
+    pub const fn new(min: Duration, factor: f64, jitter: f64) -> Self {
         Self {
             min,
             max: None,
@@ -40,13 +44,15 @@ impl ExpBackoffStrategy {
 
     /// Set the exponential backoff strategy's maximum wait value to the given duration.
     /// Otherwise, this value will be the maximum possible duration.
-    pub fn with_max(mut self, max: Duration) -> Self {
+    #[must_use]
+    pub const fn with_max(mut self, max: Duration) -> Self {
         self.max = Some(max);
         self
     }
 
     /// Set the seed used to generate jitter. Otherwise, will set RNG via entropy.
-    pub fn with_seed(mut self, seed: u64) -> Self {
+    #[must_use]
+    pub const fn with_seed(mut self, seed: u64) -> Self {
         self.seed = Some(seed);
         self
     }
@@ -70,13 +76,13 @@ impl IntoIterator for ExpBackoffStrategy {
 
     fn into_iter(self) -> Self::IntoIter {
         let init = self.min.as_secs_f64();
-        let rng = match self.seed {
-            Some(seed) => StdRng::seed_from_u64(seed),
-            None => {
+        let rng = self.seed.map_or_else(
+            || {
                 let mut thread_rng = rand::rng();
                 StdRng::from_rng(&mut thread_rng)
-            }
-        };
+            },
+            StdRng::seed_from_u64,
+        );
 
         ExpBackoffIter {
             strategy: self,
@@ -87,7 +93,7 @@ impl IntoIterator for ExpBackoffStrategy {
     }
 }
 
-/// Iterator class for [ExpBackoffStrategy]
+/// Iterator class for [`ExpBackoffStrategy`].
 pub struct ExpBackoffIter {
     strategy: ExpBackoffStrategy,
     init: f64,
@@ -99,14 +105,12 @@ impl Iterator for ExpBackoffIter {
     type Item = Duration;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let base = self.init * self.strategy.factor.powf(self.pow as f64);
-        let jitter = base * self.strategy.jitter * (self.rng.random::<f64>() * 2. - 1.);
+        let base = self.init * self.strategy.factor.powf(f64::from(self.pow));
+        #[allow(clippy::suboptimal_flops)] // FMA changes bit-exactness; tests pin specific values.
+        let jitter = base * self.strategy.jitter * (self.rng.random::<f64>() * 2.0 - 1.0);
         let current = Duration::from_secs_f64(base + jitter);
         self.pow += 1;
-        match self.strategy.max {
-            Some(max) => Some(max.min(current)),
-            None => Some(current),
-        }
+        Some(self.strategy.max.map_or(current, |max| max.min(current)))
     }
 }
 
@@ -121,15 +125,15 @@ mod test {
             .with_seed(0)
             .into_iter();
         let expected_values = [
-            1.046222683,
-            2.109384074,
-            3.620675707,
-            8.134654819,
-            15.238946024,
-            33.740716197,
-            60.399320457,
-            135.519064491,
-            268.76612757,
+            1.046_222_683,
+            2.109_384_074,
+            3.620_675_707,
+            8.134_654_819,
+            15.238_946_024,
+            33.740_716_197,
+            60.399_320_457,
+            135.519_064_491,
+            268.766_127_57,
         ];
         for expected in expected_values {
             let value = backoff_iter.next().unwrap().as_secs_f64();

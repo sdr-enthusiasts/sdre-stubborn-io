@@ -9,11 +9,11 @@ where
     A: ToSocketAddrs + Sync + Send + Clone + Unpin + 'static,
 {
     fn establish(addr: A) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>> {
-        Box::pin(TcpStream::connect(addr))
+        Box::pin(Self::connect(addr))
     }
 }
 
-/// A drop in replacement for tokio's [TcpStream](tokio::net::TcpStream), with the
+/// A drop in replacement for tokio's [`TcpStream`](tokio::net::TcpStream), with the
 /// distinction that it will automatically attempt to reconnect in the face of connectivity failures.
 ///
 /// ```

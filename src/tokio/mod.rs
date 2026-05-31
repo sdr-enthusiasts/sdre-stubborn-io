@@ -1,6 +1,7 @@
-//! Provides functionality related to asynchronous IO, including concrete
-//! ready to use structs such as [StubbornTcpStream] as well as
-//! the [UnderlyingIO trait](UnderlyingIo) and [StubbornIO struct](StubbornIo)
+//! Provides functionality related to asynchronous IO.
+//!
+//! Includes concrete ready to use structs such as [`StubbornTcpStream`] as well as
+//! the [`UnderlyingIo`] trait and [`StubbornIo`] struct
 //! needed to create custom stubborn io types yourself.
 
 mod io;
