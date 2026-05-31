@@ -129,6 +129,10 @@ enum Status<T: UnderlyingIo> {
     Connected,
     Disconnected(ReconnectStatus<T>),
     FailedAndExhausted,
+    /// Terminal state entered after a successful (or errored) `poll_shutdown`.
+    /// No further reconnects will be attempted; subsequent reads/writes/shutdowns
+    /// return `io::ErrorKind::NotConnected`.
+    Closed,
 }
 
 #[inline]
@@ -147,8 +151,11 @@ fn exhausted_err<T>() -> Poll<io::Result<T>> {
     )
 }
 
-fn disconnected_err<T>() -> Poll<io::Result<T>> {
-    poll_err(ErrorKind::NotConnected, "Underlying I/O is disconnected.")
+fn closed_err<T>() -> Poll<io::Result<T>> {
+    poll_err(
+        ErrorKind::NotConnected,
+        "Stream has been explicitly shut down.",
+    )
 }
 
 impl<T: UnderlyingIo> Deref for StubbornIo<T> {
@@ -195,10 +202,18 @@ where
     }
 
     /// Returns `true` if the stream is in a terminal state and will never reconnect
-    /// (currently: retries exhausted).
+    /// (retries exhausted, or the stream has been explicitly shut down).
     #[must_use]
     pub const fn is_terminated(&self) -> bool {
-        matches!(self.status, Status::FailedAndExhausted)
+        matches!(self.status, Status::FailedAndExhausted | Status::Closed)
+    }
+
+    /// Returns `true` if the stream has been explicitly shut down via
+    /// `AsyncWrite::poll_shutdown` (or `shutdown().await`). Distinct from
+    /// [`Self::is_terminated`], which also covers retry exhaustion.
+    #[must_use]
+    pub const fn is_closed(&self) -> bool {
+        matches!(self.status, Status::Closed)
     }
 
     /// Connects (or attempts to reconnect) using the supplied [`ReconnectOptions`].
@@ -286,8 +301,8 @@ where
             Status::Disconnected(_) => {
                 (self.options.on_connect_fail_callback)();
             }
-            Status::FailedAndExhausted => {
-                unreachable!("{prefix}on_disconnect will not occur for already exhausted state.")
+            Status::FailedAndExhausted | Status::Closed => {
+                unreachable!("{prefix}on_disconnect will not occur for already-terminal state.")
             }
         }
 
@@ -327,7 +342,7 @@ where
     fn poll_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
         let prefix = Arc::clone(&self.log_prefix);
         let (attempt, attempt_num) = match &mut self.status {
-            Status::Connected | Status::FailedAndExhausted => unreachable!(),
+            Status::Connected | Status::FailedAndExhausted | Status::Closed => unreachable!(),
             Status::Disconnected(status) => {
                 let Some(fut) = status.reconnect_attempt.as_mut() else {
                     // No attempt scheduled yet; on_disconnect will populate it.
@@ -400,6 +415,7 @@ where
                 Poll::Pending
             }
             Status::FailedAndExhausted => exhausted_err(),
+            Status::Closed => closed_err(),
         }
     }
 }
@@ -465,6 +481,7 @@ where
                 }
             },
             Status::FailedAndExhausted => exhausted_err(),
+            Status::Closed => closed_err(),
         }
     }
 
@@ -485,6 +502,7 @@ where
                 Poll::Pending
             }
             Status::FailedAndExhausted => exhausted_err(),
+            Status::Closed => closed_err(),
         }
     }
 
@@ -493,14 +511,24 @@ where
             Status::Connected => {
                 let poll = AsyncWrite::poll_shutdown(Pin::new(&mut self.underlying_io), cx);
                 if poll.is_ready() {
-                    // if completed, we are disconnected whether error or not
-                    self.on_disconnect(cx);
+                    // Whether the shutdown succeeded or errored, the caller has
+                    // expressed intent to close. Transition to the terminal
+                    // Closed state so we never reconnect, and so that further
+                    // ops surface a clean NotConnected (rather than triggering
+                    // a reconnect via on_disconnect).
+                    self.status = Status::Closed;
                 }
 
                 poll
             }
-            Status::Disconnected(_) => disconnected_err(),
+            // A disconnected stream that the caller now wants closed is
+            // semantically already "closed enough" — transition and report it.
+            Status::Disconnected(_) => {
+                self.status = Status::Closed;
+                closed_err()
+            }
             Status::FailedAndExhausted => exhausted_err(),
+            Status::Closed => closed_err(),
         }
     }
 
@@ -559,6 +587,7 @@ where
                 }
             },
             Status::FailedAndExhausted => exhausted_err(),
+            Status::Closed => closed_err(),
         }
     }
 
