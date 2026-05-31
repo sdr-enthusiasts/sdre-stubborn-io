@@ -1,6 +1,6 @@
 use super::io::{StubbornIo, UnderlyingIo};
 use std::future::Future;
-use std::io;
+use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use tokio::net::TcpStream;
@@ -10,6 +10,26 @@ impl UnderlyingIo for TcpStream {
 
     fn establish(addr: SocketAddr) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>> {
         Box::pin(Self::connect(addr))
+    }
+
+    /// TCP-specific disconnect classification. Drops `UnexpectedEof` (which a raw
+    /// `TcpStream` poll cannot directly surface; an EOF on TCP manifests as a 0-byte
+    /// read handled separately by [`UnderlyingIo::is_final_read`]).
+    fn is_disconnect_error(&self, err: &io::Error) -> bool {
+        matches!(
+            err.kind(),
+            ErrorKind::ConnectionRefused
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted
+                | ErrorKind::NotConnected
+                | ErrorKind::AddrInUse
+                | ErrorKind::AddrNotAvailable
+                | ErrorKind::BrokenPipe
+                | ErrorKind::TimedOut
+                | ErrorKind::HostUnreachable
+                | ErrorKind::NetworkUnreachable
+                | ErrorKind::NetworkDown
+        )
     }
 }
 

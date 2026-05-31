@@ -30,19 +30,27 @@ pub trait UnderlyingIo: Sized + Unpin {
     /// When IO items experience an [`io::Error`] during operation, it does not necessarily mean
     /// it is a disconnect/termination (ex: `WouldBlock`). This trait provides sensible defaults to classify
     /// which errors are considered "disconnects", but this can be overridden based on the user's needs.
+    ///
+    /// The default set is the union of error kinds that any IO transport is likely to surface on
+    /// a real disconnect: connection-lifecycle kinds, network-path kinds, write/read termination
+    /// kinds, and timeouts. Transports that legitimately encounter some of these in normal
+    /// operation should override this method (e.g. `TcpStream` overrides to drop `UnexpectedEof`,
+    /// which it can never observe directly).
     fn is_disconnect_error(&self, err: &io::Error) -> bool {
         matches!(
             err.kind(),
-            ErrorKind::NotFound
-                | ErrorKind::PermissionDenied
-                | ErrorKind::ConnectionRefused
+            ErrorKind::ConnectionRefused
                 | ErrorKind::ConnectionReset
                 | ErrorKind::ConnectionAborted
                 | ErrorKind::NotConnected
                 | ErrorKind::AddrInUse
                 | ErrorKind::AddrNotAvailable
                 | ErrorKind::BrokenPipe
-                | ErrorKind::AlreadyExists
+                | ErrorKind::TimedOut
+                | ErrorKind::UnexpectedEof
+                | ErrorKind::HostUnreachable
+                | ErrorKind::NetworkUnreachable
+                | ErrorKind::NetworkDown
         )
     }
 
