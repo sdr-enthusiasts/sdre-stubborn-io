@@ -1,6 +1,7 @@
-// Allowances scoped to legacy tests; full rewrite pending under D12.
-#![allow(missing_docs)]
-#![allow(dead_code, clippy::collection_is_never_read)]
+//! Real-socket smoke test that exercises `poll_shutdown -> Closed` against an
+//! actual `TcpStream`. Complements the deterministic in-memory suites in
+//! `state_machine.rs` and `property_tests.rs`.
+#![allow(missing_docs, clippy::collection_is_never_read)]
 
 use std::time::Duration;
 

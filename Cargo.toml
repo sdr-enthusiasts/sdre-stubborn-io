@@ -18,9 +18,10 @@ log = "0.4.30"
 rand = "0.10.1"
 
 [dev-dependencies]
-tokio = { version = "1.52.3", features = ["macros", "rt", "fs", "io-util"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread", "fs", "io-util", "sync"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
 futures = "0.3.32"
+proptest = "1.11.0"
 
 [lints.rust]
 unsafe_code      = "forbid"
