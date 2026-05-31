@@ -120,7 +120,10 @@ pub mod instantiating {
             ..DummyCtor::default()
         };
 
-        let dummy = StubbornDummy::connect(ctor).await;
+        // 0.7.0: exit_if_first_connect_fails default flipped to false;
+        // this test explicitly opts back in to the old fail-fast behavior.
+        let options = ReconnectOptions::new().with_exit_if_first_connect_fails(true);
+        let dummy = StubbornDummy::connect_with_options(ctor, options).await;
 
         assert!(dummy.is_err());
     }

@@ -138,7 +138,7 @@ impl ReconnectOptions {
     pub fn new() -> Self {
         Self {
             retries_to_attempt_fn: Box::new(|| Box::new(ExpBackoffStrategy::default().into_iter())),
-            exit_if_first_connect_fails: true,
+            exit_if_first_connect_fails: false,
             event_callback: Arc::new(|_| {}),
             connection_name: Arc::from(""),
             write_failure_policy: WriteFailurePolicy::Backpressure,

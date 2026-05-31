@@ -243,7 +243,7 @@ where
                 tcp
             }
             Err(e) => {
-                error!("{log_prefix}Initial connection failed due to: {e:?}.");
+                warn!("{log_prefix}Initial connection failed due to: {e:?}.");
                 emit(ReconnectEvent::ConnectFailed {
                     error: &e,
                     attempt: 0,
@@ -395,7 +395,7 @@ where
                 self.underlying_io = underlying_io;
             }
             Poll::Ready(Err(err)) => {
-                error!("{prefix}Connection attempt #{attempt_num} failed: {err:?}");
+                warn!("{prefix}Connection attempt #{attempt_num} failed: {err:?}");
                 (self.options.event_callback)(ReconnectEvent::ConnectFailed {
                     error: &err,
                     attempt: attempt_num,
