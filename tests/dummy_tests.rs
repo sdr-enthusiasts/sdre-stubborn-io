@@ -20,7 +20,7 @@ pub struct DummyIo {
 }
 
 #[derive(Default, Clone)]
-struct DummyCtor {
+pub struct DummyCtor {
     connect_outcomes: ConnectOutcomes,
     poll_read_results: PollReadResults,
 }
@@ -29,7 +29,9 @@ type ConnectOutcomes = Arc<Mutex<Vec<bool>>>;
 
 type PollReadResults = Arc<Mutex<Vec<(Poll<io::Result<()>>, Vec<u8>)>>>;
 
-impl UnderlyingIo<DummyCtor> for DummyIo {
+impl UnderlyingIo for DummyIo {
+    type Context = DummyCtor;
+
     fn establish(ctor: DummyCtor) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>> {
         let mut connect_attempt_outcome_results = ctor.connect_outcomes.lock().unwrap();
 
@@ -46,7 +48,7 @@ impl UnderlyingIo<DummyCtor> for DummyIo {
     }
 }
 
-type StubbornDummy = StubbornIo<DummyIo, DummyCtor>;
+type StubbornDummy = StubbornIo<DummyIo>;
 
 impl AsyncWrite for DummyIo {
     fn poll_write(

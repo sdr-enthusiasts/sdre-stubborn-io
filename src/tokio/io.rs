@@ -13,13 +13,19 @@ use tokio::time::sleep;
 
 /// Trait that should be implemented for an [`AsyncRead`] and/or [`AsyncWrite`]
 /// item to enable it to work with the [`StubbornIo`] struct.
-pub trait UnderlyingIo<C>: Sized + Unpin
-where
-    C: Clone + Send + Unpin,
-{
+///
+/// Each implementer declares its own [`Context`](UnderlyingIo::Context) type — the
+/// caller-supplied value handed to [`establish`](UnderlyingIo::establish) on every
+/// (re)connect. Implementers that need no context should set `type Context = ();`
+/// explicitly; no default is provided.
+pub trait UnderlyingIo: Sized + Unpin {
+    /// The caller-supplied value passed to [`Self::establish`] for every
+    /// (re)connect attempt. Must be cloneable so it can be reused across attempts.
+    type Context: Clone + Send + Unpin + 'static;
+
     /// The creation function is used by `StubbornIo` in order to establish both the initial IO connection
     /// in addition to performing reconnects.
-    fn establish(ctor_arg: C) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>>;
+    fn establish(ctx: Self::Context) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>>;
 
     /// When IO items experience an [`io::Error`] during operation, it does not necessarily mean
     /// it is a disconnect/termination (ex: `WouldBlock`). This trait provides sensible defaults to classify
@@ -55,18 +61,17 @@ struct AttemptsTracker {
     retries_remaining: Box<dyn Iterator<Item = Duration> + Send>,
 }
 
-struct ReconnectStatus<T, C> {
+struct ReconnectStatus<T: UnderlyingIo> {
     attempts_tracker: AttemptsTracker,
     /// `None` while no reconnect has been scheduled yet; replaced by `on_disconnect`
     /// before any poll on this status occurs.
     reconnect_attempt: Option<Pin<Box<dyn Future<Output = io::Result<T>> + Send>>>,
-    _phantom_data: PhantomData<C>,
+    _phantom_data: PhantomData<T::Context>,
 }
 
-impl<T, C> ReconnectStatus<T, C>
+impl<T> ReconnectStatus<T>
 where
-    T: UnderlyingIo<C>,
-    C: Clone + Send + Unpin + 'static,
+    T: UnderlyingIo,
 {
     pub(crate) fn new(options: &ReconnectOptions) -> Self {
         Self {
@@ -84,18 +89,18 @@ where
 /// invoke the [`UnderlyingIo::establish`] upon initialization and when a reconnect is needed.
 ///
 /// Because it implements deref, you are able to invoke all of the original methods on the wrapped IO.
-pub struct StubbornIo<T, C> {
-    status: Status<T, C>,
+pub struct StubbornIo<T: UnderlyingIo> {
+    status: Status<T>,
     underlying_io: T,
     options: ReconnectOptions,
-    ctor_arg: C,
+    ctor_arg: T::Context,
     /// Pre-formatted log prefix (e.g. `StubbornIo(foo): `), cached once at construction.
     log_prefix: Arc<str>,
 }
 
-enum Status<T, C> {
+enum Status<T: UnderlyingIo> {
     Connected,
-    Disconnected(ReconnectStatus<T, C>),
+    Disconnected(ReconnectStatus<T>),
     FailedAndExhausted,
 }
 
@@ -119,7 +124,7 @@ fn disconnected_err<T>() -> Poll<io::Result<T>> {
     poll_err(ErrorKind::NotConnected, "Underlying I/O is disconnected.")
 }
 
-impl<T, C> Deref for StubbornIo<T, C> {
+impl<T: UnderlyingIo> Deref for StubbornIo<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -127,20 +132,19 @@ impl<T, C> Deref for StubbornIo<T, C> {
     }
 }
 
-impl<T, C> DerefMut for StubbornIo<T, C> {
+impl<T: UnderlyingIo> DerefMut for StubbornIo<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.underlying_io
     }
 }
 
-impl<T, C> StubbornIo<T, C>
+impl<T> StubbornIo<T>
 where
-    T: UnderlyingIo<C>,
-    C: Clone + Send + Unpin + 'static,
+    T: UnderlyingIo,
 {
     /// Connects or creates a handle to the `UnderlyingIo` item,
     /// using the default reconnect options.
-    pub async fn connect(ctor_arg: C) -> io::Result<Self> {
+    pub async fn connect(ctor_arg: T::Context) -> io::Result<Self> {
         let options = ReconnectOptions::new();
         Self::connect_with_options(ctor_arg, options).await
     }
@@ -171,7 +175,10 @@ where
     }
 
     /// Connects (or attempts to reconnect) using the supplied [`ReconnectOptions`].
-    pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
+    pub async fn connect_with_options(
+        ctor_arg: T::Context,
+        options: ReconnectOptions,
+    ) -> io::Result<Self> {
         let log_prefix = format_log_prefix(&options.connection_name);
         let tcp = match T::establish(ctor_arg.clone()).await {
             Ok(tcp) => {
@@ -335,10 +342,9 @@ where
     }
 }
 
-impl<T, C> AsyncRead for StubbornIo<T, C>
+impl<T> AsyncRead for StubbornIo<T>
 where
-    T: UnderlyingIo<C> + AsyncRead,
-    C: Clone + Send + Unpin + 'static,
+    T: UnderlyingIo + AsyncRead,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -367,10 +373,9 @@ where
     }
 }
 
-impl<T, C> AsyncWrite for StubbornIo<T, C>
+impl<T> AsyncWrite for StubbornIo<T>
 where
-    T: UnderlyingIo<C> + AsyncWrite,
-    C: Clone + Send + Unpin + 'static,
+    T: UnderlyingIo + AsyncWrite,
 {
     /// Method for writing to the underlying IO item.
     /// If the write results in a disconnect: when `ReconnectOptions::block_on_write_failures` is true,
