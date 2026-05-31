@@ -10,6 +10,30 @@ use std::time::Duration;
 /// Only `Send` is required: the iterator is owned and advanced by a single task.
 pub type DurationIterator = Box<dyn Iterator<Item = Duration> + Send>;
 
+/// How [`StubbornIo`](crate::tokio::StubbornIo) should treat write requests issued
+/// while the underlying connection is down (or while a write itself revealed the
+/// disconnect).
+///
+/// Non-exhaustive so new strategies can be added without breaking existing matches.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WriteFailurePolicy {
+    /// Hold the write: return `Poll::Pending` and wake when (re)connection completes.
+    /// Caller-side framing semantics are preserved; back-pressure propagates to producers.
+    ///
+    /// This is the new default in 0.7.0 (a flip from the prior 0.6.x behavior, which
+    /// silently dropped writes during disconnect).
+    #[default]
+    Backpressure,
+    /// Pretend the write succeeded (`Poll::Ready(Ok(buf.len()))`) and drop the
+    /// bytes on the floor. Schedules a reconnect attempt as a side effect, but
+    /// the caller's framing layer will believe those bytes were delivered.
+    ///
+    /// Only appropriate for fire-and-forget transports where loss is acceptable
+    /// and back-pressure is not.
+    DropAndNotify,
+}
+
 /// User specified options that control the behavior of the stubborn-io upon disconnect.
 pub struct ReconnectOptions {
     /// Represents a function that generates an `Iterator`
@@ -35,9 +59,10 @@ pub struct ReconnectOptions {
     /// `StubbornIo`) and any clones share a single allocation.
     pub connection_name: Arc<str>,
 
-    /// If this is set to false (default), then the `StubbornIo` will NOT block
-    /// on write failures.
-    pub block_on_write_failures: bool,
+    /// Strategy for handling writes that arrive while disconnected, or whose
+    /// underlying poll revealed a disconnect. Defaults to
+    /// [`WriteFailurePolicy::Backpressure`].
+    pub write_failure_policy: WriteFailurePolicy,
 
     /// Optional per-attempt connect timeout. When `Some(d)`, each invocation of
     /// [`UnderlyingIo::establish`](crate::tokio::UnderlyingIo::establish) (initial,
@@ -69,7 +94,7 @@ impl ReconnectOptions {
             on_disconnect_callback: Arc::new(|| {}),
             on_connect_fail_callback: Arc::new(|| {}),
             connection_name: Arc::from(""),
-            block_on_write_failures: false,
+            write_failure_policy: WriteFailurePolicy::Backpressure,
             connect_timeout: None,
         }
     }
@@ -140,11 +165,13 @@ impl ReconnectOptions {
         self
     }
 
-    /// Configures whether writes to a disconnected stream return `Poll::Pending`
-    /// (block, `true`) or silently report `Ok(buf.len())` (drop, `false`, current default).
+    /// Configures how writes are handled while disconnected. See
+    /// [`WriteFailurePolicy`] for the semantics of each variant. Defaults to
+    /// [`WriteFailurePolicy::Backpressure`] in 0.7.0 (flipped from prior
+    /// drop-on-floor default).
     #[must_use]
-    pub const fn with_block_on_write_failures(mut self, value: bool) -> Self {
-        self.block_on_write_failures = value;
+    pub const fn with_write_failure_policy(mut self, policy: WriteFailurePolicy) -> Self {
+        self.write_failure_policy = policy;
         self
     }
 

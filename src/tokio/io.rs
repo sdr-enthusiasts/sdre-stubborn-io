@@ -1,4 +1,4 @@
-use crate::config::{ReconnectOptions, format_log_prefix};
+use crate::config::{ReconnectOptions, WriteFailurePolicy, format_log_prefix};
 use log::{error, info, warn};
 use std::future::Future;
 use std::io::{self, ErrorKind, IoSlice};
@@ -182,10 +182,10 @@ where
         (*self.log_prefix).to_string()
     }
 
-    /// Returns the current `block_on_write_failures` setting from `ReconnectOptions`.
+    /// Returns the configured [`WriteFailurePolicy`].
     #[must_use]
-    pub const fn get_block_on_write_failures(&self) -> bool {
-        self.options.block_on_write_failures
+    pub const fn get_write_failure_policy(&self) -> WriteFailurePolicy {
+        self.options.write_failure_policy
     }
 
     /// Returns `true` if the stream is currently connected and ready for I/O.
@@ -408,45 +408,62 @@ impl<T> AsyncWrite for StubbornIo<T>
 where
     T: UnderlyingIo + AsyncWrite,
 {
-    /// Method for writing to the underlying IO item.
-    /// If the write results in a disconnect: when `ReconnectOptions::block_on_write_failures` is true,
-    /// `Poll::Pending` is returned to the caller and the buffer is held. Otherwise, the write is skipped.
-    /// No error is returned to the caller.
+    /// Writes to the underlying IO item.
+    ///
+    /// If a write reveals a disconnect (or one is already in progress), behavior
+    /// depends on [`WriteFailurePolicy`]:
+    ///
+    /// * `Backpressure` (default): return `Poll::Pending`, hold the buffer, wake
+    ///   when (re)connection completes.
+    /// * `DropAndNotify`: return `Poll::Ready(Ok(buf.len()))` to keep the caller's
+    ///   framing layer moving, while the bytes themselves are discarded. The
+    ///   reconnect machinery is engaged either way.
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         let prefix = Arc::clone(&self.log_prefix);
+        let policy = self.get_write_failure_policy();
         match &mut self.status {
             Status::Connected => {
                 let poll = AsyncWrite::poll_write(Pin::new(&mut self.underlying_io), cx, buf);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    if self.get_block_on_write_failures() {
-                        warn!("{prefix}Write disconnect detected. Blocking on write");
-                        self.on_disconnect(cx);
-                        Poll::Pending
-                    } else {
-                        error!("{prefix}Write disconnect detected. Skipping message");
-                        self.on_disconnect(cx);
-                        Poll::Ready(Ok(buf.len()))
+                    match policy {
+                        WriteFailurePolicy::Backpressure => {
+                            warn!("{prefix}Write disconnect detected. Applying back-pressure");
+                            self.on_disconnect(cx);
+                            Poll::Pending
+                        }
+                        WriteFailurePolicy::DropAndNotify => {
+                            error!(
+                                "{prefix}Write disconnect detected. Dropping {} byte(s)",
+                                buf.len()
+                            );
+                            self.on_disconnect(cx);
+                            Poll::Ready(Ok(buf.len()))
+                        }
                     }
                 } else {
                     poll
                 }
             }
-            Status::Disconnected(_) => {
-                if self.get_block_on_write_failures() {
-                    warn!("{prefix}Write disconnect detected. Blocking on write");
+            Status::Disconnected(_) => match policy {
+                WriteFailurePolicy::Backpressure => {
+                    warn!("{prefix}Write while disconnected. Applying back-pressure");
                     self.poll_disconnect(cx);
                     Poll::Pending
-                } else {
-                    error!("{prefix}Write disconnect detected. Skipping Message");
+                }
+                WriteFailurePolicy::DropAndNotify => {
+                    error!(
+                        "{prefix}Write while disconnected. Dropping {} byte(s)",
+                        buf.len()
+                    );
                     self.poll_disconnect(cx);
                     Poll::Ready(Ok(buf.len()))
                 }
-            }
+            },
             Status::FailedAndExhausted => exhausted_err(),
         }
     }
@@ -487,46 +504,60 @@ where
         }
     }
 
-    /// Method for writing to the underlying IO item.
-    /// If the write results in a disconnect: when `ReconnectOptions::block_on_write_failures` is true,
-    /// `Poll::Pending` is returned to the caller and the buffer is held. Otherwise, the write is skipped.
-    /// No error is returned to the caller.
+    /// Vectored variant of [`Self::poll_write`]; same policy semantics apply.
+    ///
+    /// Under `DropAndNotify` the returned count is the sum of all input buffer
+    /// lengths — i.e. the bytes the caller asked to write — which keeps the
+    /// caller's framing cursor advancing. Those bytes are not actually
+    /// transmitted; this is the documented drop semantic of the policy.
     fn poll_write_vectored(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<io::Result<usize>> {
         let prefix = Arc::clone(&self.log_prefix);
+        let policy = self.get_write_failure_policy();
+        let total: usize = bufs.iter().map(|b| b.len()).sum();
         match &mut self.status {
             Status::Connected => {
                 let poll =
                     AsyncWrite::poll_write_vectored(Pin::new(&mut self.underlying_io), cx, bufs);
 
                 if self.is_write_disconnect_detected(&poll) {
-                    if self.get_block_on_write_failures() {
-                        warn!("{prefix}Write disconnect detected. Blocking on write");
-                        self.on_disconnect(cx);
-                        Poll::Pending
-                    } else {
-                        error!("{prefix}Write disconnect detected. Skipping message");
-                        self.on_disconnect(cx);
-                        Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
+                    match policy {
+                        WriteFailurePolicy::Backpressure => {
+                            warn!("{prefix}Write disconnect detected. Applying back-pressure");
+                            self.on_disconnect(cx);
+                            Poll::Pending
+                        }
+                        WriteFailurePolicy::DropAndNotify => {
+                            error!(
+                                "{prefix}Write disconnect detected. Dropping {total} byte(s) across {} buffer(s)",
+                                bufs.len()
+                            );
+                            self.on_disconnect(cx);
+                            Poll::Ready(Ok(total))
+                        }
                     }
                 } else {
                     poll
                 }
             }
-            Status::Disconnected(_) => {
-                if self.get_block_on_write_failures() {
-                    warn!("{prefix}Write disconnect detected. Blocking on write");
+            Status::Disconnected(_) => match policy {
+                WriteFailurePolicy::Backpressure => {
+                    warn!("{prefix}Write while disconnected. Applying back-pressure");
                     self.poll_disconnect(cx);
                     Poll::Pending
-                } else {
-                    error!("{prefix}Write disconnect detected. Skipping Message");
-                    self.poll_disconnect(cx);
-                    Poll::Ready(Ok(bufs.iter().map(|buf| buf.len()).sum()))
                 }
-            }
+                WriteFailurePolicy::DropAndNotify => {
+                    error!(
+                        "{prefix}Write while disconnected. Dropping {total} byte(s) across {} buffer(s)",
+                        bufs.len()
+                    );
+                    self.poll_disconnect(cx);
+                    Poll::Ready(Ok(total))
+                }
+            },
             Status::FailedAndExhausted => exhausted_err(),
         }
     }
