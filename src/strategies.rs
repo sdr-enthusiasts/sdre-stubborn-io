@@ -108,8 +108,15 @@ impl Iterator for ExpBackoffIter {
         let base = self.init * self.strategy.factor.powf(f64::from(self.pow));
         #[allow(clippy::suboptimal_flops)] // FMA changes bit-exactness; tests pin specific values.
         let jitter = base * self.strategy.jitter * (self.rng.random::<f64>() * 2.0 - 1.0);
-        let current = Duration::from_secs_f64(base + jitter);
-        self.pow += 1;
+        let secs = base + jitter;
+        // Clamp to a finite, non-negative value before constructing a Duration.
+        // `Duration::from_secs_f64` panics on NaN, negative, or > Duration::MAX.
+        let current = if secs.is_finite() && secs >= 0.0 {
+            Duration::try_from_secs_f64(secs).unwrap_or(Duration::MAX)
+        } else {
+            Duration::MAX
+        };
+        self.pow = self.pow.saturating_add(1);
         Some(self.strategy.max.map_or(current, |max| max.min(current)))
     }
 }

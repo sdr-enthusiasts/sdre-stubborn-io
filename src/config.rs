@@ -2,10 +2,13 @@
 //! specifically related to reconnect behavior.
 
 use crate::strategies::ExpBackoffStrategy;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Boxed iterator yielding the wait durations between reconnection attempts.
-pub type DurationIterator = Box<dyn Iterator<Item = Duration> + Send + Sync>;
+///
+/// Only `Send` is required: the iterator is owned and advanced by a single task.
+pub type DurationIterator = Box<dyn Iterator<Item = Duration> + Send>;
 
 /// User specified options that control the behavior of the stubborn-io upon disconnect.
 pub struct ReconnectOptions {
@@ -18,16 +21,19 @@ pub struct ReconnectOptions {
     pub exit_if_first_connect_fails: bool,
 
     /// Invoked when the `StubbornIo` establishes a connection.
-    pub on_connect_callback: Box<dyn Fn() + Send + Sync>,
+    pub on_connect_callback: Arc<dyn Fn() + Send + Sync>,
 
     /// Invoked when the `StubbornIo` loses its active connection.
-    pub on_disconnect_callback: Box<dyn Fn() + Send + Sync>,
+    pub on_disconnect_callback: Arc<dyn Fn() + Send + Sync>,
 
     /// Invoked when the `StubbornIo` fails a connection attempt.
-    pub on_connect_fail_callback: Box<dyn Fn() + Send + Sync>,
+    pub on_connect_fail_callback: Arc<dyn Fn() + Send + Sync>,
 
     /// Identifier for this connection, used in log messages.
-    pub connection_name: String,
+    ///
+    /// Stored as `Arc<str>` so that the formatted log prefix (held internally by
+    /// `StubbornIo`) and any clones share a single allocation.
+    pub connection_name: Arc<str>,
 
     /// If this is set to false (default), then the `StubbornIo` will NOT block
     /// on write failures.
@@ -50,10 +56,10 @@ impl ReconnectOptions {
         Self {
             retries_to_attempt_fn: Box::new(|| Box::new(ExpBackoffStrategy::default().into_iter())),
             exit_if_first_connect_fails: true,
-            on_connect_callback: Box::new(|| {}),
-            on_disconnect_callback: Box::new(|| {}),
-            on_connect_fail_callback: Box::new(|| {}),
-            connection_name: String::new(),
+            on_connect_callback: Arc::new(|| {}),
+            on_disconnect_callback: Arc::new(|| {}),
+            on_connect_fail_callback: Arc::new(|| {}),
+            connection_name: Arc::from(""),
             block_on_write_failures: false,
         }
     }
@@ -82,7 +88,7 @@ impl ReconnectOptions {
     pub fn with_retries_generator<F, I, IN>(mut self, retries_generator: F) -> Self
     where
         F: 'static + Send + Sync + Fn() -> IN,
-        I: 'static + Send + Sync + Iterator<Item = Duration>,
+        I: 'static + Send + Iterator<Item = Duration>,
         IN: IntoIterator<IntoIter = I, Item = Duration>,
     {
         self.retries_to_attempt_fn = Box::new(move || Box::new(retries_generator().into_iter()));
@@ -99,28 +105,28 @@ impl ReconnectOptions {
     /// Sets the callback invoked on every successful (re)connect.
     #[must_use]
     pub fn with_on_connect_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_connect_callback = Box::new(cb);
+        self.on_connect_callback = Arc::new(cb);
         self
     }
 
     /// Sets the callback invoked when the active connection is lost.
     #[must_use]
     pub fn with_on_disconnect_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_disconnect_callback = Box::new(cb);
+        self.on_disconnect_callback = Arc::new(cb);
         self
     }
 
     /// Sets the callback invoked when a connect/reconnect attempt fails.
     #[must_use]
     pub fn with_on_connect_fail_callback(mut self, cb: impl Fn() + 'static + Send + Sync) -> Self {
-        self.on_connect_fail_callback = Box::new(cb);
+        self.on_connect_fail_callback = Arc::new(cb);
         self
     }
 
     /// Sets the human-readable name used in log lines for this connection.
     #[must_use]
-    pub fn with_connection_name(mut self, name: impl Into<String>) -> Self {
-        self.connection_name = name.into();
+    pub fn with_connection_name(mut self, name: impl AsRef<str>) -> Self {
+        self.connection_name = Arc::from(name.as_ref());
         self
     }
 
@@ -130,5 +136,18 @@ impl ReconnectOptions {
     pub const fn with_block_on_write_failures(mut self, value: bool) -> Self {
         self.block_on_write_failures = value;
         self
+    }
+}
+
+/// Build the formatted log prefix for a given connection name.
+///
+/// Internal helper; the result is cached once per `StubbornIo` at construction.
+#[must_use]
+pub(crate) fn format_log_prefix(name: &str) -> Arc<str> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        Arc::from("StubbornIo: ")
+    } else {
+        Arc::from(format!("StubbornIo({trimmed}): "))
     }
 }
