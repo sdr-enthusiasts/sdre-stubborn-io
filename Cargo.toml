@@ -1,6 +1,6 @@
 [package]
 name = "sdre-stubborn-io"
-version = "0.7.1"
+version = "0.7.2"
 authors = ["David Raifaizen <david.raifaizen@protonmail.com>", "Fred Clausen"]
 edition = "2024"
 rust-version = "1.85"
@@ -14,7 +14,7 @@ readme = "README.md"
 
 [dependencies]
 tokio = { version = "1.52.3", features = ["time", "net"] }
-log = "0.4.30"
+log = "0.4.32"
 rand = "0.10.1"
 
 [dev-dependencies]
