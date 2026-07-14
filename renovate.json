@@ -18,6 +18,7 @@
   "prCreation": "immediate",
   "automerge": true,
   "platformAutomerge": true,
+  "forkProcessing": "enabled",
   "nix": {
     "enabled": true
   },
